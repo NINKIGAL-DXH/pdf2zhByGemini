@@ -19,6 +19,23 @@ function createWindow() {
     autoHideMenuBar: true,
   });
 
+  // Register developer shortcut helpers (Reload and Toggle Developer Tools)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const isControlOrMeta = input.control || input.meta;
+    const key = input.key.toLowerCase();
+    
+    // CommandOrControl + R or F5 to reload
+    if ((isControlOrMeta && key === 'r') || input.key === 'F5') {
+      mainWindow.reload();
+      event.preventDefault();
+    }
+    // CommandOrControl + Option + I or Control + Shift + I or F12 to toggle DevTools
+    if ((isControlOrMeta && input.alt && key === 'i') || (isControlOrMeta && input.shift && key === 'i') || input.key === 'F12') {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
+
   // Start the background Express server
   try {
     console.log("Starting backend Express server...");
