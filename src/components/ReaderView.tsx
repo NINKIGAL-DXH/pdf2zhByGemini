@@ -27,7 +27,7 @@ export default function ReaderView({
   const [editText, setEditText] = useState("");
   const [isTranslatingLocal, setIsTranslatingLocal] = useState(false);
 
-  const currentPage = pages[currentPageIdx] || pages[0];
+  const currentPage = pages[currentPageIdx] || pages[0] || { width: 612, height: 792, blocks: [], pageNumber: 1 };
 
   const handlePagePrev = () => {
     if (currentPageIdx > 0) setCurrentPageIdx(currentPageIdx - 1);
