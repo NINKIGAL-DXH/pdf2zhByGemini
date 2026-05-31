@@ -1,0 +1,6 @@
+{
+  "name": "PDF2ZH Desktop",
+  "description": "macOS client UI for pdf2zh - PDF document translation with layout preservation using LLMs",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

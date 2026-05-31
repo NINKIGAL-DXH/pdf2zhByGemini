@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-mac-bg: #0F0F0F;
+  --color-mac-dark-bg: rgb(15, 15, 15);
+  --color-accent-amber: #3b82f6;
+}
+
+body {
+  background-color: #0F0F0F;
+  margin: 0;
+  height: 100%;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Glassmorphism utility */
+.acrylic-sidebar {
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+.pdf-page-shadow {
+  box-shadow: 0 4px 20px -2px rgba(0,0,0,0.1), 0 2px 10px -1px rgba(0,0,0,0.05);
+}
+
+/* Layout preserved document styling */
+.pdf-text-block {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pdf-text-block:hover {
+  background-color: rgba(59, 130, 246, 0.08);
+  outline: 1.5px solid rgba(59, 130, 246, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Pulse translations status */
+@keyframes softPulse {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+.status-pulse {
+  animation: softPulse 2s infinite ease-in-out;
+}
+

@@ -1,0 +1,45 @@
+name: Build macOS DMG
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build macOS DMG Packaging
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Clean Cache and Install Dependencies
+        run: |
+          npm ci || npm install
+
+      - name: Compile Layout Configuration & Express Server
+        run: |
+          npm run build
+
+      - name: Install macOS Desktop Packager
+        run: |
+          npm install --save-dev electron electron-builder
+
+      - name: Compile and Package macOS DMG
+        run: |
+          npx electron-builder build --mac dmg --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Compress and Upload DMG Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF2ZH-Translation-GUI-macOS-DMG
+          path: dist-desktop/*.dmg
