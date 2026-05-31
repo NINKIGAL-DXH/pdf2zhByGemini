@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { AIProviderConfig, TranslationParams, TranslatedDoc, PDFPage, PDFLayoutBlock } from "./types";
 import { PRESET_PAPERS, AVAILABLE_LANGUAGES, MOCK_TERMINAL_LOGS } from "./data";
 import ReaderView from "./components/ReaderView";
+import { parsePDFFile } from "./pdfParser";
 
 export default function App() {
   // Sidebar Tabs
@@ -87,7 +88,11 @@ export default function App() {
     size: string;
     pageCount: number;
     presetKey?: string;
+    parsedPages?: PDFPage[];
   } | null>(null);
+
+  // Parser loading indicator
+  const [isParsingPDF, setIsParsingPDF] = useState(false);
 
   // Drag and Drop active status
   const [dragActive, setDragActive] = useState(false);
@@ -205,17 +210,40 @@ export default function App() {
     }
   };
 
-  const loadCustomFile = (file: File) => {
-    // Generate page counts automatically from 1 to 5 pages
-    const pageNum = Math.floor(Math.random() * 4) + 2; // 2 to 5 pages
+  const loadCustomFile = async (file: File) => {
+    setIsParsingPDF(true);
     const sizeStr = (file.size / (1024 * 1024)).toFixed(1) + " MB";
 
+    // Set a quick preview state with pageCount: 1 while loading
     setSelectedFile({
       rawFile: file,
       name: file.name,
       size: sizeStr,
-      pageCount: pageNum
+      pageCount: 1
     });
+
+    try {
+      const parsed = await parsePDFFile(file);
+      setSelectedFile({
+        rawFile: file,
+        name: file.name,
+        size: sizeStr,
+        pageCount: parsed.pageCount,
+        parsedPages: parsed.pages
+      });
+    } catch (err) {
+      console.error("Failed to parse PDF custom file", err);
+      // fallback
+      const pageNum = Math.floor(Math.random() * 4) + 2;
+      setSelectedFile({
+        rawFile: file,
+        name: file.name,
+        size: sizeStr,
+        pageCount: pageNum
+      });
+    } finally {
+      setIsParsingPDF(false);
+    }
   };
 
   const loadPresetDoc = (presetKey: "transformer" | "rag" | "pdf2zh_guide") => {
@@ -364,6 +392,9 @@ export default function App() {
     if (selectedFile.presetKey && PRESET_PAPERS[selectedFile.presetKey]) {
       // Pull actual rich layout from static presets
       generatedPages = JSON.parse(JSON.stringify(PRESET_PAPERS[selectedFile.presetKey].pages));
+    } else if (selectedFile.parsedPages) {
+      // Use the actual pages parsed from the real PDF document in the browser!
+      generatedPages = JSON.parse(JSON.stringify(selectedFile.parsedPages));
     } else {
       // Create highly authentic layout blocks dynamically for custom uploaded file name
       for (let pIdx = 1; pIdx <= totalPages; pIdx++) {
@@ -879,7 +910,19 @@ export default function App() {
                         </div>
 
                         {/* Dropzone Details or Imported Presets Panel */}
-                        {selectedFile && (
+                        {isParsingPDF ? (
+                          <div className="bg-blue-500/5 border border-blue-500/10 p-4 rounded-xl flex items-center space-x-3" id="selected-file-details-loading">
+                            <div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin shrink-0"></div>
+                            <div>
+                              <span className="font-semibold text-xs text-slate-200 block">
+                                Analyzing layout & extracting coordinates...
+                              </span>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                Gathering document pages and vertical alignments...
+                              </p>
+                            </div>
+                          </div>
+                        ) : selectedFile ? (
                           <div className="bg-blue-500/5 border border-blue-500/10 p-4 rounded-xl flex items-center justify-between" id="selected-file-details">
                             <div className="flex items-center space-x-3 overflow-hidden">
                               <div className="p-2.5 bg-blue-600 text-white rounded-lg shadow-md shrink-0">
@@ -907,7 +950,7 @@ export default function App() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                        )}
+                        ) : null}
 
                         {/* Translation Options Accordion Cards */}
                         <div className="bg-white/5 rounded-xl border border-white/5 p-5 space-y-4" id="advanced-options">
