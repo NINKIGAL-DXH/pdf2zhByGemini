@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 
 // Set production environment variables
@@ -42,16 +42,25 @@ function createWindow() {
     require(path.join(__dirname, 'dist', 'server.cjs'));
   } catch (error) {
     console.error("Failed to start server.cjs:", error);
+    dialog.showErrorBox(
+      "Backend Server Error",
+      "Failed to start the background translation service:\n\n" + (error.stack || error)
+    );
   }
 
   // Load the web app which is hosted by the Express server on port 13028
   // Give Express a split second to boot
   setTimeout(() => {
-    mainWindow.loadURL('http://localhost:13028').catch((err) => {
-      console.warn("Retrying link connection...", err);
+    mainWindow.loadURL('http://127.0.0.1:13028').catch((err) => {
+      console.warn("Retrying link connection (attempt 2)...", err);
       setTimeout(() => {
-        mainWindow.loadURL('http://localhost:13028').catch((e) => {
+        mainWindow.loadURL('http://127.0.0.1:13028').catch((e) => {
           console.error("Local web server failed to respond:", e);
+          dialog.showErrorBox(
+            "Connection Port Error",
+            "The desktop interface could not connect to the local translation service on port 13028.\n\n" +
+            "Please confirm no other application is using this port, or retry launching the application.\n\nError details: " + e.message
+          );
         });
       }, 1500);
     });
