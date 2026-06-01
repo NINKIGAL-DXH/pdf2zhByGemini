@@ -174,30 +174,53 @@ export default function ReaderView({
     }
   };
 
-  const getBlockStyles = (type: PDFLayoutBlock["type"], isHovered: boolean) => {
+  const getBlockStyles = (type: PDFLayoutBlock["type"], isHovered: boolean, isTranslated: boolean) => {
     const base = "absolute select-none transition-all duration-350 rounded";
     
-    // Default border/bg mapping if outlineMode is active
     let typeConfig = "";
-    if (outlineMode) {
-      typeConfig = "border border-sky-200 bg-white/95";
-      if (type === "title") typeConfig = "border border-amber-300 bg-white/95 font-bold text-center";
-      else if (type === "abstract") typeConfig = "border border-emerald-250 bg-white/95 italic text-slate-800";
-      else if (type === "header") typeConfig = "border border-indigo-300 bg-white/95 font-semibold";
-      else if (type === "equation") typeConfig = "border border-purple-300 bg-white/95 text-center font-mono text-purple-700";
-      else if (type === "figure") typeConfig = "border border-rose-350 bg-white/40 text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
-      else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400";
+    if (isTranslated) {
+      if (outlineMode) {
+        typeConfig = "border border-sky-200 bg-white/95 text-slate-800";
+        if (type === "title") typeConfig = "border border-amber-300 bg-white/95 font-bold text-center text-slate-900";
+        else if (type === "abstract") typeConfig = "border border-emerald-250 bg-white/95 italic text-slate-800";
+        else if (type === "header") typeConfig = "border border-indigo-300 bg-white/95 font-semibold text-slate-800";
+        else if (type === "equation") typeConfig = "border border-purple-300 bg-white/95 text-center font-mono text-purple-700";
+        else if (type === "figure") typeConfig = "border border-rose-350 bg-white/40 text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
+        else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400";
+      } else {
+        // Clean Paper view (Translated)
+        if (type === "figure" || type === "equation") {
+          // Figures and equations should be transparent so background image graphics shine through
+          typeConfig = "bg-transparent text-transparent border-none pointer-events-none";
+        } else if (type === "title") {
+          typeConfig = "bg-white font-bold text-center text-slate-900";
+        } else if (type === "header") {
+          typeConfig = "bg-white font-semibold text-slate-850";
+        } else if (type === "abstract") {
+          typeConfig = "bg-white italic text-slate-700";
+        } else {
+          typeConfig = "bg-white text-slate-800"; // default paragraph white mask cover
+        }
+      }
     } else {
-      // Clean Paper view
-      if (type === "figure") typeConfig = "border border-dashed border-slate-300 bg-white/40";
-      else if (type === "title") typeConfig = "bg-white font-bold text-center text-slate-900";
-      else if (type === "header") typeConfig = "bg-white font-semibold text-slate-800";
-      else if (type === "abstract") typeConfig = "bg-white italic text-slate-700";
-      else typeConfig = "bg-white"; // default paragraph cover
+      // Original Page
+      if (outlineMode) {
+        typeConfig = "border border-sky-200 bg-sky-500/[0.04] text-slate-800";
+        if (type === "title") typeConfig = "border border-amber-200 bg-amber-500/[0.03] font-bold text-center text-slate-900";
+        else if (type === "abstract") typeConfig = "border border-emerald-200 bg-emerald-500/[0.03] italic text-slate-800";
+        else if (type === "header") typeConfig = "border border-indigo-200 bg-indigo-500/[0.03] font-semibold text-slate-800";
+        else if (type === "equation") typeConfig = "border border-purple-200 bg-purple-500/[0.03] text-center font-mono text-purple-700";
+        else if (type === "figure") typeConfig = "border border-rose-250 bg-rose-500/[0.03] text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
+        else if (type === "footer") typeConfig = "border border-gray-200 bg-gray-500/[0.03] text-[10px] text-gray-400";
+      } else {
+        // Clean original page view - completely transparent to show native crisp PDF!
+        // This is gorgeous and keeps elements fully aligned & copyable
+        typeConfig = "bg-transparent text-transparent hover:bg-white/[0.02]";
+      }
     }
 
     const hoverConfig = isHovered 
-      ? `ring-2 ring-blue-500 bg-white z-20 scale-[1.012] shadow-md border-blue-400 border-solid ${!outlineMode ? 'border' : ''}` 
+      ? `ring-2 ring-blue-500 bg-white z-20 scale-[1.012] shadow-md border-blue-400 border-solid !text-slate-900 ${!outlineMode ? 'border' : ''}` 
       : `z-10 hover:border-sky-300`;
 
     return `${base} ${typeConfig} ${hoverConfig}`;
@@ -349,7 +372,11 @@ export default function ReaderView({
           >
             {/* Background PDF page rendering */}
             {currentPage.backgroundUrl && (
-              <img src={currentPage.backgroundUrl} alt="PDF background" className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-30" />
+              <img 
+                src={currentPage.backgroundUrl} 
+                alt="PDF background" 
+                className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 ${outlineMode ? 'opacity-35' : 'opacity-100'}`} 
+              />
             )}
 
             {/* Grid background lines mimicking PDF layout bounds */}
@@ -365,7 +392,7 @@ export default function ReaderView({
               return (
                 <div
                   key={block.id}
-                  className={getBlockStyles(block.type, isHovered)}
+                  className={getBlockStyles(block.type, isHovered, false)}
                   style={{
                     left: `${block.x}%`,
                     top: `${block.y}%`,
@@ -380,7 +407,9 @@ export default function ReaderView({
                 >
                   <div className="p-1 w-full h-full overflow-y-auto overflow-x-hidden pr-0.5 style-scrollbar flex flex-col justify-center">
                     {block.type === "figure" ? (
-                      <VisualFigureRenderer caption={block.originalText} />
+                      outlineMode ? (
+                        <VisualFigureRenderer caption={block.originalText} />
+                      ) : null
                     ) : (
                       <span className="align-middle block leading-normal break-words whitespace-pre-wrap select-text">
                         {block.originalText}
@@ -424,7 +453,11 @@ export default function ReaderView({
           >
             {/* Background PDF page rendering */}
             {currentPage.backgroundUrl && (
-              <img src={currentPage.backgroundUrl} alt="PDF background" className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-30" />
+              <img 
+                src={currentPage.backgroundUrl} 
+                alt="PDF background" 
+                className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 ${outlineMode ? 'opacity-35' : 'opacity-100'}`} 
+              />
             )}
 
             {/* Grid background lines */}
@@ -441,7 +474,7 @@ export default function ReaderView({
               return (
                 <div
                   key={block.id}
-                  className={getBlockStyles(block.type, isHovered)}
+                  className={getBlockStyles(block.type, isHovered, true)}
                   style={{
                     left: `${block.x}%`,
                     top: `${block.y}%`,
@@ -456,7 +489,9 @@ export default function ReaderView({
                 >
                   <div className="p-1 w-full h-full overflow-y-auto overflow-x-hidden pr-0.5 style-scrollbar flex flex-col justify-center">
                     {block.type === "figure" ? (
-                      <VisualFigureRenderer caption={block.translatedText || block.originalText} />
+                      outlineMode ? (
+                        <VisualFigureRenderer caption={block.translatedText || block.originalText} />
+                      ) : null
                     ) : (
                       <span className="align-middle block leading-normal break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text">
                         {block.translatedText || <span className="text-slate-400 italic">Translating...</span>}

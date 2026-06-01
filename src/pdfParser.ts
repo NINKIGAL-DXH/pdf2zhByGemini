@@ -1,30 +1,101 @@
 import * as pdfjsLib from "pdfjs-dist";
 
-// Safely resolve the worker builder using Vite's ?worker compiler flag.
-// This ensures same-origin worker building which satisfies Iframe CORS policies.
+// Polyfill asyncIterator for ReadableStream to prevent "undefined is not a function (near '...value of readableStream...')" errors in pdfjs-dist
+if (typeof ReadableStream !== "undefined" && !ReadableStream.prototype[Symbol.asyncIterator]) {
+  ReadableStream.prototype[Symbol.asyncIterator] = async function* () {
+    const reader = this.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+}
+
+// Safely resolve the worker builder using Vite's asset URL resolution.
 let isWorkerInitialized = false;
 
 async function initWorker() {
   if (isWorkerInitialized) return;
   isWorkerInitialized = true;
 
+  const polyfillCode = `
+// Polyfill asyncIterator for ReadableStream inside Worker context
+if (typeof ReadableStream !== 'undefined' && !ReadableStream.prototype[Symbol.asyncIterator]) {
+  ReadableStream.prototype[Symbol.asyncIterator] = async function* () {
+    const reader = this.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+}
+`;
+
+  // Try fetching from identical origin under our served endpoint /pdf.worker.min.mjs
   try {
-    // @ts-ignore
-    const PDFWorker = await import("pdfjs-dist/build/pdf.worker.min.mjs?worker");
-    if (PDFWorker && PDFWorker.default) {
-      // Use workerPort for Vite worker creation
-      pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker.default();
-      console.log("Successfully initialized native Vite ?worker in pdfjs-dist");
+    console.log("Fetching local worker from identical origin: /pdf.worker.min.mjs");
+    const response = await fetch("/pdf.worker.min.mjs");
+    if (!response.ok) {
+      throw new Error(`Served local worker route responded with status: ${response.status}`);
+    }
+    const workerText = await response.text();
+    const blob = new Blob([polyfillCode, "\n", workerText], { type: "application/javascript" });
+    const blobUrl = URL.createObjectURL(blob);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+    console.log("Successfully polyfilled and initialized local PDF.js worker via Blob URL!");
+    return;
+  } catch (e) {
+    console.warn("Could not load/polyfill identical origin worker. Trying Vite asset URL fallback...", e);
+  }
+
+  // Try Vite asset URL
+  try {
+    const viteWorkerUrl = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url
+    ).toString();
+    const response = await fetch(viteWorkerUrl);
+    if (response.ok) {
+      const workerText = await response.text();
+      const blob = new Blob([polyfillCode, "\n", workerText], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+      console.log("Successfully polyfilled and initialized Vite bundler PDF.js worker via Blob URL!");
+      return;
     }
   } catch (e) {
-    console.warn("Could not load Vite standard ?worker. Trying jsDelivr fallback...", e);
-    try {
-      const version = pdfjsLib.version || "6.0.227";
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
-      console.log(`Configured jsDelivr standalone CDN PDFJS worker for version: ${version}`);
-    } catch (cdnErr) {
-      console.error("All worker configurations failed, leaving default fake-worker fallback:", cdnErr);
+    console.warn("Could not polyfill Vite asset worker. Trying jsDelivr CDN fallback...", e);
+  }
+
+  // Try jsDelivr CDN
+  try {
+    const version = pdfjsLib.version || "6.0.227";
+    const cdnUrl = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+    const response = await fetch(cdnUrl);
+    if (response.ok) {
+      const workerText = await response.text();
+      const blob = new Blob([polyfillCode, "\n", workerText], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = blobUrl;
+      console.log("Successfully polyfilled and initialized CDN PDF.js worker via Blob URL!");
+      return;
+    } else {
+      // Raw direct link to CDN if fetching is blocked
+      pdfjsLib.GlobalWorkerOptions.workerSrc = cdnUrl;
+      console.log("Set static fallback worker to jsDelivr CDN directly:", cdnUrl);
     }
+  } catch (cdnErr) {
+    console.error("All PDF.js worker configurations failed.", cdnErr);
   }
 }
 
@@ -78,6 +149,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             canvasContext: ctx,
             viewport: renderViewport,
           };
+          // @ts-ignore
           await page.render(renderContext).promise;
         }
 

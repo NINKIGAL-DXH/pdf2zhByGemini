@@ -40,7 +40,7 @@ export default function App() {
       provider: "gemini",
       apiKey: "Injected Cloud Key",
       endpoint: "Cloud run",
-      model: "gemini-3.5-flash",
+      model: "gemini-3.1-flash",
       isActive: true,
     },
     {
@@ -113,6 +113,60 @@ export default function App() {
   // History database
   const [history, setHistory] = useState<TranslatedDoc[]>([]);
 
+  const saveHistoryToLocalStorage = (newHistory: TranslatedDoc[]) => {
+    setHistory(newHistory);
+    try {
+      localStorage.setItem("pdf2zh_translation_history", JSON.stringify(newHistory));
+    } catch (err) {
+      console.warn("Storage quota exceeded, attempting to prune background image data from older history documents to save space...", err);
+      try {
+        const prunedHistory = newHistory.map((doc, idx) => {
+          if (idx === 0) return doc; // Keep full content for the most recent one
+          
+          return {
+            ...doc,
+            pages: doc.pages.map(page => ({
+              ...page,
+              backgroundUrl: undefined // Remove the heavy base64 image data
+            }))
+          };
+        });
+        localStorage.setItem("pdf2zh_translation_history", JSON.stringify(prunedHistory));
+        setHistory(prunedHistory);
+        console.log("Successfully saved pruned history to localStorage.");
+      } catch (innerErr) {
+        console.warn("Pruning backgroundUrls was not enough. Retrying by keeping only the 3 most recent entries with backgrounds removed...", innerErr);
+        try {
+          const truncatedHistory = newHistory.slice(0, 3).map((doc, idx) => {
+            if (idx === 0) return doc;
+            return {
+              ...doc,
+              pages: doc.pages.map(page => ({
+                ...page,
+                backgroundUrl: undefined
+              }))
+            };
+          });
+          localStorage.setItem("pdf2zh_translation_history", JSON.stringify(truncatedHistory));
+          setHistory(truncatedHistory);
+        } catch (lastLocErr) {
+          console.error("Even truncated history exceeded local storage quota, clearing older history items.", lastLocErr);
+          try {
+            const minimalHistory = newHistory.slice(0, 1).map(doc => ({
+              ...doc,
+              pages: doc.pages.map(page => ({
+                ...page,
+                backgroundUrl: undefined
+              }))
+            }));
+            localStorage.setItem("pdf2zh_translation_history", JSON.stringify(minimalHistory));
+            setHistory(minimalHistory);
+          } catch (e) {}
+        }
+      }
+    }
+  };
+
   // Reader View Activation
   const [activeReaderDoc, setActiveReaderDoc] = useState<TranslatedDoc | null>(null);
 
@@ -148,14 +202,13 @@ export default function App() {
         },
         providerConfig: {
           provider: "gemini",
-          model: "gemini-3.5-flash"
+          model: "gemini-3.1-flash"
         },
         pages: JSON.parse(JSON.stringify(PRESET_PAPERS.transformer.pages)),
         status: "completed",
         progress: 100
       };
-      setHistory([seedDoc]);
-      localStorage.setItem("pdf2zh_translation_history", JSON.stringify([seedDoc]));
+      saveHistoryToLocalStorage([seedDoc]);
     }
 
     // Load active provider selection index
@@ -306,7 +359,7 @@ export default function App() {
 
     // Add service configurations
     if (prov.provider === "gemini") {
-      cmd += ` --service gemini --model gemini-3.5-flash`;
+      cmd += ` --service gemini --model gemini-3.1-flash`;
     } else if (prov.provider === "openai") {
       cmd += ` --service openai --model ${prov.model || "gpt-4o-mini"}`;
       if (prov.endpoint && !prov.endpoint.includes("api.openai.com")) {
@@ -568,8 +621,7 @@ export default function App() {
     };
 
     const newHistory = [completedDoc, ...history];
-    setHistory(newHistory);
-    localStorage.setItem("pdf2zh_translation_history", JSON.stringify(newHistory));
+    saveHistoryToLocalStorage(newHistory);
     
     setActiveTranslatingDoc(completedDoc);
   };
@@ -577,8 +629,7 @@ export default function App() {
   const deleteHistoryItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const updated = history.filter(d => d.id !== id);
-    setHistory(updated);
-    localStorage.setItem("pdf2zh_translation_history", JSON.stringify(updated));
+    saveHistoryToLocalStorage(updated);
   };
 
   // Callback to update custom block translating in ReaderView
@@ -598,8 +649,7 @@ export default function App() {
       return doc;
     });
 
-    setHistory(updatedHistory);
-    localStorage.setItem("pdf2zh_translation_history", JSON.stringify(updatedHistory));
+    saveHistoryToLocalStorage(updatedHistory);
     
     // Also update currently reading document
     const curReaderDoc = updatedHistory.find(d => d.id === docId);

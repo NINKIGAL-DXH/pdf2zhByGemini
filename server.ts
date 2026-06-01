@@ -51,13 +51,13 @@ app.post("/api/test-connection", async (req, res) => {
       try {
         const ai = getGeminiClient();
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-3.1-flash",
           contents: "Hello! Reply with OK",
         });
         return res.json({
           success: true,
           message: "Successfully connected to Cloud Gemini API!",
-          modelUsed: "gemini-3.5-flash",
+          modelUsed: "gemini-3.1-flash",
         });
       } catch (err: any) {
         return res.json({
@@ -166,7 +166,7 @@ ${JSON.stringify(batch)}
 `;
 
         const geminiResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.1-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json",
