@@ -10,15 +10,26 @@ async function initWorker() {
   isWorkerInitialized = true;
 
   try {
-    // @ts-ignore
-    const PDFWorker = await import("pdfjs-dist/build/pdf.worker.min.mjs?worker");
-    if (PDFWorker && PDFWorker.default) {
-      pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker.default();
-      isWorkerSet = true;
-      console.log("Successfully initialized native Vite ?worker in pdfjs-dist");
+    // Try our local same-origin hosted worker first! It is extremely safe and solves all sandboxed iframe CORS concerns!
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    isWorkerSet = true;
+    console.log("Successfully configured same-origin local `/pdf.worker.min.mjs` for PDFJS");
+  } catch (err) {
+    console.warn("Could not set local workerSrc, trying fallback...", err);
+  }
+
+  if (!isWorkerSet) {
+    try {
+      // @ts-ignore
+      const PDFWorker = await import("pdfjs-dist/build/pdf.worker.min.mjs?worker");
+      if (PDFWorker && PDFWorker.default) {
+        pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker.default();
+        isWorkerSet = true;
+        console.log("Successfully initialized native Vite ?worker in pdfjs-dist");
+      }
+    } catch (e) {
+      console.warn("Could not load Vite standard ?worker. Trying jsDelivr fallback...", e);
     }
-  } catch (e) {
-    console.warn("Could not load Vite standard ?worker. Trying jsDelivr fallback...", e);
   }
 
   // Fallback to jsDelivr CDN if custom Web Worker creation gets blocked
@@ -129,7 +140,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           line.items.sort((a, b) => a.x - b.x);
         });
 
-        // Construct distinct raw line segments
+        // Construct distinct raw line segments, splitting them if there are large horizontal gaps (multi-column)
         interface LineSegment {
           text: string;
           minX: number;
@@ -138,25 +149,105 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           height: number;
         }
 
-        const rawLines: LineSegment[] = lines.map((line) => {
-          const textParts = line.items.map((it) => it.str);
-          const text = textParts.join(" ").replace(/\s+/g, " ");
-          const minX = Math.min(...line.items.map((it) => it.x));
-          const maxX = Math.max(...line.items.map((it) => it.x + it.w));
-          const avgHeight = line.items.reduce((acc, it) => acc + it.h, 0) / line.items.length;
+        const rawLines: LineSegment[] = [];
 
-          return {
-            text,
-            minX,
-            maxX,
-            y: line.y,
-            height: avgHeight || 10,
-          };
+        lines.forEach((line) => {
+          if (line.items.length === 0) return;
+
+          // Split line items into segments if there is a large gap (multi-column separation)
+          let currentSegment: any[] = [line.items[0]];
+
+          for (let i = 1; i < line.items.length; i++) {
+            const prevItem = line.items[i - 1];
+            const currItem = line.items[i];
+            
+            // Gap between previous item's right edge and current item's left edge
+            const gap = currItem.x - (prevItem.x + prevItem.w);
+
+            // If horizontal gap is larger than 12% of the page width, split it!
+            const gapThreshold = pageWidth * 0.12;
+            if (gap > gapThreshold) {
+              const text = currentSegment.map((it) => it.str).join(" ").replace(/\s+/g, " ");
+              const minX = Math.min(...currentSegment.map((it) => it.x));
+              const maxX = Math.max(...currentSegment.map((it) => it.x + it.w));
+              const avgHeight = currentSegment.reduce((acc, it) => acc + it.h, 0) / currentSegment.length;
+              
+              if (text.trim() !== "") {
+                rawLines.push({
+                  text: text.trim(),
+                  minX,
+                  maxX,
+                  y: line.y,
+                  height: avgHeight || 10,
+                });
+              }
+              currentSegment = [currItem];
+            } else {
+              currentSegment.push(currItem);
+            }
+          }
+
+          if (currentSegment.length > 0) {
+            const text = currentSegment.map((it) => it.str).join(" ").replace(/\s+/g, " ");
+            const minX = Math.min(...currentSegment.map((it) => it.x));
+            const maxX = Math.max(...currentSegment.map((it) => it.x + it.w));
+            const avgHeight = currentSegment.reduce((acc, it) => acc + it.h, 0) / currentSegment.length;
+
+            if (text.trim() !== "") {
+              rawLines.push({
+                text: text.trim(),
+                minX,
+                maxX,
+                y: line.y,
+                height: avgHeight || 10,
+              });
+            }
+          }
         });
 
-        // Group nearby lines into paragraphs
+        // Classify each rawLine segment into columns: "left" | "right" | "full"
+        interface ClassifiedLine extends LineSegment {
+          col: "left" | "right" | "full";
+        }
+
+        const classifiedLines: ClassifiedLine[] = rawLines.map((line) => {
+          let col: "left" | "right" | "full" = "full";
+          const center = pageWidth / 2;
+          
+          if (line.maxX <= center + 40) {
+            col = "left";
+          } else if (line.minX >= center - 40) {
+            col = "right";
+          }
+          
+          return { ...line, col };
+        });
+
+        // Sort classified lines in a logical multi-column reading order:
+        // Higher elements first, but side-by-side elements sorted left-column before right-column
+        classifiedLines.sort((a, b) => {
+          const yGap = a.y - b.y;
+          // 40 points represents quite significant vertical layout distance (approx 4-5 text rows)
+          if (Math.abs(yGap) > 40) {
+            return b.y - a.y; // Top to bottom first
+          }
+          
+          // Side-by-side line segments (horizontal banding):
+          // full spans first, then left column, then right column
+          if (a.col !== b.col) {
+            const priority = { "full": 1, "left": 2, "right": 3 };
+            return priority[a.col] - priority[b.col];
+          }
+          
+          if (a.y !== b.y) {
+            return b.y - a.y;
+          }
+          return a.minX - b.minX;
+        });
+
+        // Group consecutive lines of the same column classification into paragraphs/headers
         const blocks: ExtractedBlock[] = [];
-        let currentBlockLines: LineSegment[] = [];
+        let currentBlockLines: ClassifiedLine[] = [];
 
         const flushBlock = (index: number) => {
           if (currentBlockLines.length === 0) return;
@@ -179,10 +270,11 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           // Let's dynamically classify block type
           let blockType: ExtractedBlock["type"] = "paragraph";
           const cleanedText = segmentText.trim();
+          const colType = currentBlockLines[0].col;
 
-          if (cleanedText.length < 60 && index === 0 && (cleanedText.split(" ").length < 7 || /^[A-Z]/.test(cleanedText))) {
+          if (cleanedText.length < 90 && colType === "full" && index < 3 && (/^[A-Z]/.test(cleanedText) || cleanedText.toLowerCase().includes("paper") || cleanedText.toLowerCase().includes("journal"))) {
             blockType = "title";
-          } else if (cleanedText.length < 50 && (/^[0-9]\.?\s+[A-Z]/i.test(cleanedText) || cleanedText.toLowerCase().includes("abstract") || cleanedText.toLowerCase().includes("introduction") || cleanedText.toLowerCase().includes("conclusion") || cleanedText.toLowerCase().includes("reference"))) {
+          } else if (cleanedText.length < 60 && (/^[0-9]\.?\s+[A-Z]/i.test(cleanedText) || cleanedText.toLowerCase().includes("abstract") || cleanedText.toLowerCase().includes("introduction") || cleanedText.toLowerCase().includes("methodology") || cleanedText.toLowerCase().includes("conclusion") || cleanedText.toLowerCase().includes("reference"))) {
             blockType = "header";
           } else if (cleanedText.toLowerCase().includes("abstract") && cleanedText.length > 50) {
             blockType = "abstract";
@@ -190,7 +282,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             blockType = "equation";
           } else if (cleanedText.includes("Figure") || cleanedText.includes("Fig.") || cleanedText.includes("Table") || cleanedText.includes("Tab.")) {
             blockType = "figure";
-          } else if (pctY > 88 && cleanedText.length < 100) {
+          } else if (pctY > 88 && cleanedText.length < 120) {
             blockType = "footer";
           }
 
@@ -207,21 +299,21 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           currentBlockLines = [];
         };
 
-        rawLines.forEach((line, lIdx) => {
+        classifiedLines.forEach((line, lIdx) => {
           if (currentBlockLines.length === 0) {
             currentBlockLines.push(line);
             return;
           }
 
-          const lastLine = currentBlockLines[currentBlockLines.length - 1];
-          const verticalGap = Math.abs(lastLine.y - line.y); // Vertical coordinates are descending
+          const lastLine = currentBlockLines[0]; // Anchor column
+          const prevLine = currentBlockLines[currentBlockLines.length - 1];
+          const verticalGap = Math.abs(prevLine.y - line.y); // Vertical coordinates are descending
 
-          // If lines are close horizontally and vertically, merge them
+          // Group lines if vertical gap is reasonable, and they share the same column mode
           const isCloseVertically = verticalGap < (line.height * 2.8);
-          const overlapsHorizontally = Math.max(lastLine.minX, line.minX) < Math.min(lastLine.maxX, line.maxX) ||
-            (Math.abs(lastLine.minX - line.minX) < 100);
+          const isSameCol = lastLine.col === line.col;
 
-          if (isCloseVertically && overlapsHorizontally) {
+          if (isCloseVertically && isSameCol) {
             currentBlockLines.push(line);
           } else {
             flushBlock(lIdx);
@@ -230,7 +322,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
         });
 
         // Flush final block
-        flushBlock(rawLines.length - 1);
+        flushBlock(classifiedLines.length - 1);
 
         extractedPages.push({
           pageNumber: pageNum,

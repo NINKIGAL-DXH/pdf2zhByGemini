@@ -1,11 +1,29 @@
 import express from "express";
 import path from "path";
-import { GoogleGenAI } from "@google/genai";
+import fs from "fs";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 app.use(express.json({ limit: "50mb" }));
+
+// Resolve and serve the pdfjs-dist web worker locally under same-origin to pass iframe browser sandbox CORS blocks
+app.get("/pdf.worker.min.mjs", (req, res) => {
+  try {
+    const workerPath = path.join(process.cwd(), "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    if (fs.existsSync(workerPath)) {
+      res.setHeader("Content-Type", "application/javascript");
+      return res.sendFile(workerPath);
+    }
+    // Fallback if not found in build path
+    console.warn("pdf.worker.min.mjs not found at standard path:", workerPath);
+    return res.status(404).send("Worker script not found");
+  } catch (err: any) {
+    console.error("Failed to serve local pdf.worker.min.mjs:", err);
+    return res.status(500).send("Internal server error serving worker");
+  }
+});
 
 // Initialize Gemini SDK with custom user agent for telemetry
 const getGeminiClient = () => {
@@ -133,42 +151,65 @@ app.post("/api/translate", async (req, res) => {
   if (useCloudGemini) {
     try {
       const ai = getGeminiClient();
-      const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment, with no additional markdown, wrapping block, explanatory text or prefix/suffix.
+      const batchSize = 25;
+      const translatedBlocks: string[] = [];
 
-Format:
-["translation of element 0", "translation of element 1", ...]
+      console.log(`Starting Cloud Gemini translation of ${textBlocks.length} blocks in batches of ${batchSize}...`);
 
-Here is the input array:
-${JSON.stringify(textBlocks)}
+      for (let i = 0; i < textBlocks.length; i += batchSize) {
+        const batch = textBlocks.slice(i, i + batchSize);
+        const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment.
+
+Here is the input array of strings:
+${JSON.stringify(batch)}
 `;
 
-      const geminiResponse = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+        const geminiResponse = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.STRING
+              }
+            }
+          },
+        });
 
-      const responseText = geminiResponse.text?.trim() || "[]";
-      try {
-        const parsed = JSON.parse(responseText);
-        if (Array.isArray(parsed)) {
-          return res.json({
-            success: true,
-            translatedBlocks: parsed,
-            fallbackUsed: (provider !== "gemini"),
-            message: provider !== "gemini" 
-              ? "Translated using Gemini fallback because the targeted local model is running on your offline machine." 
-              : "Translated successfully via Gemini Engine."
-          });
+        const responseText = geminiResponse.text?.trim() || "[]";
+        try {
+          const parsed = JSON.parse(responseText);
+          if (Array.isArray(parsed)) {
+            translatedBlocks.push(...parsed);
+          } else {
+            console.warn("Gemini batch translation did not return an array. Falling back to original texts for this batch.");
+            translatedBlocks.push(...batch);
+          }
+        } catch (parseErr: any) {
+          console.error("Failed to parse Gemini batch output JSON. Raw text was:", responseText, parseErr);
+          // Fallback preserve text
+          translatedBlocks.push(...batch);
         }
-      } catch (parseErr) {
-        console.error("Failed to parse Gemini output, raw text was: ", responseText);
       }
+
+      console.log(`Gemini translation complete! Extracted total of ${translatedBlocks.length} translated blocks.`);
+
+      return res.json({
+        success: true,
+        translatedBlocks,
+        fallbackUsed: (provider !== "gemini"),
+        message: provider !== "gemini" 
+          ? "Translated using Gemini fallback because the targeted local model is running on your offline machine." 
+          : "Translated successfully via Gemini Engine."
+      });
     } catch (apiErr: any) {
-      console.error("Gemini fallback translation failed: ", apiErr);
+      console.error("Gemini fallback translation failed:", apiErr);
+      return res.status(500).json({ 
+        error: `Gemini API Call Failed: ${apiErr.message || apiErr}` 
+      });
     }
   }
 
@@ -208,7 +249,7 @@ Input List: ${JSON.stringify(textBlocks)}`;
             return res.json({
               success: true,
               translatedBlocks: list,
-            });
+             });
           }
         } catch {
           // Try regex extract
@@ -218,13 +259,17 @@ Input List: ${JSON.stringify(textBlocks)}`;
             return res.json({ success: true, translatedBlocks: list });
           }
         }
+      } else {
+        const errText = await apiResponse.text();
+        return res.status(apiResponse.status).json({ error: `OpenAI api response error: ${errText}` });
       }
     } catch (openaiErr: any) {
       console.error("OpenAI model fetch failed: ", openaiErr);
+      return res.status(500).json({ error: `OpenAI connection error: ${openaiErr.message}` });
     }
   }
 
-  // Final simulation safety net
+  // Final simulation safety net - only used as fallback if explicit simulation mode requested
   const mockTranslations = textBlocks.map(block => {
     // Simple basic substitution
     if (block.toLowerCase().includes("retrieval-augmented generation")) return "检索增强生成 (RAG)";
