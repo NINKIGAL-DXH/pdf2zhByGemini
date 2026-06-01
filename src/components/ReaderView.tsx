@@ -17,7 +17,8 @@ import {
   EyeOff,
   Cpu,
   TrendingUp,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from "lucide-react";
 
 // Beautiful SVG illustration mockups for figures in parsed PDF blocks to ensure images never "disappear"
@@ -116,7 +117,7 @@ interface ReaderViewProps {
   targetLang: string;
   onClose: () => void;
   onUpdateBlock: (pageIdx: number, blockId: string, newText: string) => void;
-  onReTranslateBlock: (pageIdx: number, blockId: string, text: string) => Promise<void>;
+  onReTranslateBlock: (pageIdx: number, blockId: string, text: string) => Promise<any>;
 }
 
 export default function ReaderView({
@@ -133,6 +134,8 @@ export default function ReaderView({
   const [editingBlock, setEditingBlock] = useState<PDFLayoutBlock | null>(null);
   const [editText, setEditText] = useState("");
   const [isTranslatingLocal, setIsTranslatingLocal] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [scale, setScale] = useState(0.8);
   const [outlineMode, setOutlineMode] = useState(true);
 
@@ -149,6 +152,8 @@ export default function ReaderView({
   const startEditing = (block: PDFLayoutBlock) => {
     setEditingBlock(block);
     setEditText(block.translatedText || "");
+    setAiError(null);
+    setAiWarning(null);
   };
 
   const saveEdit = () => {
@@ -161,14 +166,31 @@ export default function ReaderView({
   const triggerAIReTranslate = async () => {
     if (!editingBlock) return;
     setIsTranslatingLocal(true);
+    setAiError(null);
+    setAiWarning(null);
     try {
-      await onReTranslateBlock(currentPageIdx, editingBlock.id, editingBlock.originalText);
-      const currentBlockInState = pages[currentPageIdx]?.blocks.find(b => b.id === editingBlock.id);
-      if (currentBlockInState?.translatedText) {
-        setEditText(currentBlockInState.translatedText);
+      const res = await onReTranslateBlock(currentPageIdx, editingBlock.id, editingBlock.originalText);
+      if (res && typeof res === "object") {
+        if (res.success) {
+          const currentBlockInState = pages[currentPageIdx]?.blocks.find(b => b.id === editingBlock.id);
+          if (currentBlockInState?.translatedText) {
+            setEditText(currentBlockInState.translatedText);
+          }
+          if (res.fallbackUsed) {
+            setAiWarning(res.message || "Model Offline warning: silently bypassed utilizing Cloud Gemini fallback backend.");
+          }
+        } else {
+          setAiError(res.message || "The active model engine failed to translate this block.");
+        }
+      } else {
+        const currentBlockInState = pages[currentPageIdx]?.blocks.find(b => b.id === editingBlock.id);
+        if (currentBlockInState?.translatedText) {
+          setEditText(currentBlockInState.translatedText);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("AI Re-translate failed", err);
+      setAiError(err.message || "Unknown error: check your API Endpoint configuration and retry.");
     } finally {
       setIsTranslatingLocal(false);
     }
@@ -571,8 +593,28 @@ export default function ReaderView({
             {/* Status alerts */}
             {isTranslatingLocal && (
               <div className="mb-4 flex items-center space-x-2 text-xs text-blue-400 bg-blue-500/10 p-2.5 rounded border border-blue-500/25">
-                <div className="w-3 h-3 rounded-full border-2 border-blue-400 border-t-transparent animate-spin"></div>
+                <div className="w-3 h-3 rounded-full border-2 border-blue-400 border-t-transparent animate-spin animate-fade-in"></div>
                 <span>Server is translating using the active LLM engine...</span>
+              </div>
+            )}
+
+            {aiError && (
+              <div className="mb-4 bg-rose-500/10 border border-rose-500/20 p-3 rounded-md text-xs text-rose-300 leading-normal flex items-start space-x-2 animate-fade-in" id="reader-translate-error">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-rose-200">Re-Translation Connection Fault (重新翻译失败)</span>
+                  <p className="mt-1 font-mono text-[11px] bg-black/40 p-1.5 rounded text-rose-250 border border-white/5">{aiError}</p>
+                </div>
+              </div>
+            )}
+
+            {aiWarning && (
+              <div className="mb-4 bg-amber-500/10 border border-amber-500/20 p-3 rounded-md text-xs text-amber-300 leading-normal flex items-start space-x-2 animate-fade-in" id="reader-translate-warning">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-200">Local Model Bypassed (已启用备份防挂兜底翻译)</span>
+                  <p className="mt-0.5 text-slate-300">{aiWarning}</p>
+                </div>
               </div>
             )}
 

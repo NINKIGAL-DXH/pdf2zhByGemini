@@ -110,6 +110,10 @@ export default function App() {
   const [translationProgress, setTranslationProgress] = useState(0);
   const [activeTranslatingDoc, setActiveTranslatingDoc] = useState<TranslatedDoc | null>(null);
 
+  // Active translation warnings and errors
+  const [translationWarning, setTranslationWarning] = useState<string | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+
   // History database
   const [history, setHistory] = useState<TranslatedDoc[]>([]);
 
@@ -396,6 +400,8 @@ export default function App() {
     setTranslationProgress(0);
     setCurrentProgressStep("parsing");
     setActiveTab("translate");
+    setTranslationWarning(null);
+    setTranslationError(null);
 
     const prov = providers[selectedProviderIdx];
     const totalPages = selectedFile.pageCount;
@@ -569,15 +575,32 @@ export default function App() {
           
           if (body.fallbackUsed) {
             pushLog(`[pdf2zh] [WARNING] ${body.message}`);
+            setTranslationWarning(body.message);
           } else if (body.simulated) {
             pushLog(`[pdf2zh] [INFO] Local offline model simulate: ${body.message}`);
           } else {
             pushLog(`[pdf2zh] Received translation feed from API engine.`);
           }
+        } else {
+          const errMsg = body.error || body.message || "Invalid or empty response structure from backend model.";
+          pushLog(`[pdf2zh] [ERROR] Service translation error: ${errMsg}`);
+          setTranslationError(errMsg);
         }
+      } else {
+        let errMsg = `HTTP Server returned status ${response.status}`;
+        try {
+          const body = await response.json();
+          if (body && (body.error || body.message)) {
+            errMsg = body.error || body.message;
+          }
+        } catch (_) {}
+        pushLog(`[pdf2zh] [ERROR] Translation endpoint failed: ${errMsg}`);
+        setTranslationError(errMsg);
       }
     } catch (err: any) {
-      pushLog(`[pdf2zh] [ERROR] API call failed: ${err.message || err}. Falling back to layout pre-translations.`);
+      const errMsg = err.message || err;
+      pushLog(`[pdf2zh] [ERROR] API connection failed: ${errMsg}. Falling back to layout pre-translations.`);
+      setTranslationError(errMsg);
     }
 
     // If server translation didn't fill it, ensure they are translated utilizing static mocks
@@ -680,10 +703,36 @@ export default function App() {
         const body = await response.json();
         if (body.success && Array.isArray(body.translatedBlocks) && body.translatedBlocks[0]) {
           handleUpdateBlockInDocReader(docId, pageIdx, blockId, body.translatedBlocks[0]);
+          return {
+            success: true,
+            fallbackUsed: body.fallbackUsed,
+            message: body.message
+          };
+        } else {
+          return {
+            success: false,
+            message: body.error || body.message || "Invalid back-end translation response structure."
+          };
         }
+      } else {
+        let errMsg = `HTTP Server returned status ${response.status}`;
+        try {
+          const body = await response.json();
+          if (body && (body.error || body.message)) {
+            errMsg = body.error || body.message;
+          }
+        } catch (_) {}
+        return {
+          success: false,
+          message: errMsg
+        };
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Reader live translation request failed", err);
+      return {
+        success: false,
+        message: err.message || err
+      };
     }
   };
 
@@ -1217,6 +1266,32 @@ export default function App() {
                           );
                         })}
                       </div>
+
+                      {translationError && (
+                        <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-4 text-xs text-rose-300 leading-relaxed flex items-start space-x-2.5 animate-fade-in" id="translation-process-error">
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span className="font-bold text-rose-200">AI Engine Translation Fault (模型翻译及调试故障)</span>
+                            <p className="mt-1 font-mono text-[11px] bg-black/30 p-2 rounded border border-white/5">{translationError}</p>
+                            <p className="mt-1.5 text-slate-400">
+                              💡 建议：请在“模型引擎设置”标签页中验证您的 API 地址或密钥，或点击上方“Test Connectivity”测试连接稳定性。
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {translationWarning && (
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-xs text-amber-300 leading-relaxed flex items-start space-x-2.5 animate-fade-in" id="translation-process-warning">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <span className="font-bold text-amber-200">Local Model Offline Fallback Activated (已启用云端 Gemini 译文防挂兜底)</span>
+                            <p className="mt-1">{translationWarning}</p>
+                            <p className="mt-1.5 text-slate-400 text-[11px]">
+                              由于云端网页沙盒限制，它无法直接调用 localhost 接口。您可以在本地通过 node 运行该 app 即获满血 local 速度，或借助 Ngrok 将本地端口暴露给公网。
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Live document compilation visualizer grids */}
                       <div className="bg-black/30 border border-white/5 p-4 rounded-xl flex flex-col space-y-2.5" id="compilation-grids">
