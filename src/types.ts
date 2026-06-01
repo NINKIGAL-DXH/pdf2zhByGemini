@@ -36,6 +36,7 @@ export interface PDFPage {
   blocks: PDFLayoutBlock[];
   width: number;
   height: number;
+  backgroundUrl?: string;
 }
 
 export interface TranslatedDoc {

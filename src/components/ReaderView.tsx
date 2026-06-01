@@ -180,24 +180,25 @@ export default function ReaderView({
     // Default border/bg mapping if outlineMode is active
     let typeConfig = "";
     if (outlineMode) {
-      typeConfig = "border border-sky-200 bg-sky-50/15";
-      if (type === "title") typeConfig = "border border-amber-300 bg-amber-50/20 font-bold text-center";
-      else if (type === "abstract") typeConfig = "border border-emerald-250 bg-emerald-50/10 italic text-slate-800";
-      else if (type === "header") typeConfig = "border border-indigo-300 bg-indigo-50/15 font-semibold";
-      else if (type === "equation") typeConfig = "border border-purple-300 bg-purple-50/5 text-center font-mono text-purple-700";
-      else if (type === "figure") typeConfig = "border border-rose-350 bg-rose-50/5 text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
-      else if (type === "footer") typeConfig = "border border-gray-250 bg-gray-50/30 text-[10px] text-gray-400";
+      typeConfig = "border border-sky-200 bg-white/95";
+      if (type === "title") typeConfig = "border border-amber-300 bg-white/95 font-bold text-center";
+      else if (type === "abstract") typeConfig = "border border-emerald-250 bg-white/95 italic text-slate-800";
+      else if (type === "header") typeConfig = "border border-indigo-300 bg-white/95 font-semibold";
+      else if (type === "equation") typeConfig = "border border-purple-300 bg-white/95 text-center font-mono text-purple-700";
+      else if (type === "figure") typeConfig = "border border-rose-350 bg-white/40 text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
+      else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400";
     } else {
       // Clean Paper view
-      if (type === "figure") typeConfig = "border border-dashed border-slate-300 bg-slate-50";
-      else if (type === "title") typeConfig = "font-bold text-center text-slate-900";
-      else if (type === "header") typeConfig = "font-semibold text-slate-800";
-      else if (type === "abstract") typeConfig = "italic text-slate-700";
+      if (type === "figure") typeConfig = "border border-dashed border-slate-300 bg-white/40";
+      else if (type === "title") typeConfig = "bg-white font-bold text-center text-slate-900";
+      else if (type === "header") typeConfig = "bg-white font-semibold text-slate-800";
+      else if (type === "abstract") typeConfig = "bg-white italic text-slate-700";
+      else typeConfig = "bg-white"; // default paragraph cover
     }
 
     const hoverConfig = isHovered 
-      ? `ring-2 ring-blue-500 bg-blue-50/30 z-20 scale-[1.012] shadow-md border-blue-400 border-solid ${!outlineMode ? 'border' : ''}` 
-      : `z-10 hover:bg-sky-50/10 ${outlineMode ? 'hover:border-sky-300' : ''}`;
+      ? `ring-2 ring-blue-500 bg-white z-20 scale-[1.012] shadow-md border-blue-400 border-solid ${!outlineMode ? 'border' : ''}` 
+      : `z-10 hover:border-sky-300`;
 
     return `${base} ${typeConfig} ${hoverConfig}`;
   };
@@ -346,6 +347,11 @@ export default function ReaderView({
             }}
             id="pdf-original-canvas"
           >
+            {/* Background PDF page rendering */}
+            {currentPage.backgroundUrl && (
+              <img src={currentPage.backgroundUrl} alt="PDF background" className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-30" />
+            )}
+
             {/* Grid background lines mimicking PDF layout bounds */}
             <div className="absolute inset-0 grid grid-cols-12 grid-rows-12 pointer-events-none opacity-5">
               {Array.from({ length: 144 }).map((_, i) => (
@@ -416,6 +422,11 @@ export default function ReaderView({
             }}
             id="pdf-translated-canvas"
           >
+            {/* Background PDF page rendering */}
+            {currentPage.backgroundUrl && (
+              <img src={currentPage.backgroundUrl} alt="PDF background" className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-30" />
+            )}
+
             {/* Grid background lines */}
             <div className="absolute inset-0 grid grid-cols-12 grid-rows-12 pointer-events-none opacity-5">
               {Array.from({ length: 144 }).map((_, i) => (

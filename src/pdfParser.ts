@@ -2,7 +2,6 @@ import * as pdfjsLib from "pdfjs-dist";
 
 // Safely resolve the worker builder using Vite's ?worker compiler flag.
 // This ensures same-origin worker building which satisfies Iframe CORS policies.
-let isWorkerSet = false;
 let isWorkerInitialized = false;
 
 async function initWorker() {
@@ -10,30 +9,15 @@ async function initWorker() {
   isWorkerInitialized = true;
 
   try {
-    // Try our local same-origin hosted worker first! It is extremely safe and solves all sandboxed iframe CORS concerns!
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-    isWorkerSet = true;
-    console.log("Successfully configured same-origin local `/pdf.worker.min.mjs` for PDFJS");
-  } catch (err) {
-    console.warn("Could not set local workerSrc, trying fallback...", err);
-  }
-
-  if (!isWorkerSet) {
-    try {
-      // @ts-ignore
-      const PDFWorker = await import("pdfjs-dist/build/pdf.worker.min.mjs?worker");
-      if (PDFWorker && PDFWorker.default) {
-        pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker.default();
-        isWorkerSet = true;
-        console.log("Successfully initialized native Vite ?worker in pdfjs-dist");
-      }
-    } catch (e) {
-      console.warn("Could not load Vite standard ?worker. Trying jsDelivr fallback...", e);
+    // @ts-ignore
+    const PDFWorker = await import("pdfjs-dist/build/pdf.worker.min.mjs?worker");
+    if (PDFWorker && PDFWorker.default) {
+      // Use workerPort for Vite worker creation
+      pdfjsLib.GlobalWorkerOptions.workerPort = new PDFWorker.default();
+      console.log("Successfully initialized native Vite ?worker in pdfjs-dist");
     }
-  }
-
-  // Fallback to jsDelivr CDN if custom Web Worker creation gets blocked
-  if (!isWorkerSet) {
+  } catch (e) {
+    console.warn("Could not load Vite standard ?worker. Trying jsDelivr fallback...", e);
     try {
       const version = pdfjsLib.version || "6.0.227";
       pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
@@ -60,6 +44,7 @@ export interface ExtractedPage {
   width: number;
   height: number;
   blocks: ExtractedBlock[];
+  backgroundUrl?: string;
 }
 
 export async function parsePDFFile(file: File): Promise<{ pageCount: number; pages: ExtractedPage[] }> {
@@ -80,6 +65,24 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
         const viewport = page.getViewport({ scale: 1.0 });
         const { width: pageWidth, height: pageHeight } = viewport;
 
+        // Render page to canvas to generate a background image
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const renderScale = 1.5; // High resolution for better visibility
+        const renderViewport = page.getViewport({ scale: renderScale });
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+
+        if (ctx) {
+          const renderContext = {
+            canvasContext: ctx,
+            viewport: renderViewport,
+          };
+          await page.render(renderContext).promise;
+        }
+
+        const backgroundUrl = canvas.toDataURL("image/png");
+
         const textContent = await page.getTextContent();
         const items = textContent.items as any[];
 
@@ -89,6 +92,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             pageNumber: pageNum,
             width: pageWidth,
             height: pageHeight,
+            backgroundUrl,
             blocks: [
               {
                 id: `p-${pageNum}-scanned-p1`,
@@ -328,6 +332,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           pageNumber: pageNum,
           width: pageWidth,
           height: pageHeight,
+          backgroundUrl,
           blocks,
         });
       } catch (pageErr) {
