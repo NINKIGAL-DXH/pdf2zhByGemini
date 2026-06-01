@@ -67,57 +67,61 @@ app.post("/api/test-connection", async (req, res) => {
       }
     }
 
-    // Checking for localhost targets which aren't accessible from cloud run containers
-    const isLocalhost = endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1"));
-    if (isLocalhost) {
-      return res.json({
-        success: true, // Show success with simulation warning so the user can test the app
-        isLocal: true,
-        message: `Validated configuration format for local model: "${model}". (Note: Since we are running in the cloud sandbox, accessing local hosts like LM Studio or Ollama on 'localhost' requires running this desktop client locally, but we will seamlessly simulate translating this for your browser preview!)`,
-      });
-    }
-
-    // Real standard internet endpoint test (e.g. OpenAI official API)
-    if (provider === "openai" && (!endpoint || endpoint.includes("api.openai.com"))) {
-      if (!apiKey) {
-        return res.json({
-          success: false,
-          message: "OpenAI API Key is required for remote testing.",
-        });
-      }
-
-      const targetEndpoint = endpoint || "https://api.openai.com/v1/chat/completions";
-      const targetModel = model || "gpt-3.5-turbo";
+    // Try standard custom/local endpoint testing (e.g. LM Studio, Ollama, OpenAI)
+    if (provider === "openai" || provider === "lmstudio" || provider === "omlx") {
+      const targetEndpoint = endpoint || "https://api.openai.com/v1";
+      const targetModel = model || (provider === "lmstudio" ? "qwen2.5-7b-instruct" : provider === "omlx" ? "llama3.2" : "gpt-3.5-turbo");
+      const url = targetEndpoint.endsWith("/chat/completions") ? targetEndpoint : `${targetEndpoint}/chat/completions`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-      const response = await fetch(targetEndpoint.endsWith("/chat/completions") ? targetEndpoint : `${targetEndpoint}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [{ role: "user", content: "ping" }],
-          max_tokens: 5,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        return res.json({
-          success: true,
-          message: `Successfully connected to OpenAI API with model "${targetModel}"!`,
+      try {
+        console.log(`Testing connection directly to provider "${provider}" custom endpoint: ${url}`);
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 5,
+          }),
+          signal: controller.signal,
         });
-      } else {
-        const errorText = await response.text();
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          return res.json({
+            success: true,
+            message: `Successfully connected to target model "${targetModel}"!`,
+          });
+        } else {
+          const errorText = await response.text();
+          const isLocalhost = endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1"));
+          let adviceMsg = "";
+          if (isLocalhost) {
+            adviceMsg = "\n\n💡提示: AI Studio 网页版目前在云端运行，无法直接请求您内网或本机 localhost 的端口。如有需要，欢迎您在左上角设置中【导出为 ZIP 格式】并在您本机运行，或在 LM Studio 中开启隧道工具 (Ngrok)。";
+          }
+          return res.json({
+            success: false,
+            message: `Host returned error code ${response.status}: ${errorText.substring(0, 150)}${adviceMsg}`,
+          });
+        }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        const isLocalhost = endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1"));
+        let adviceMsg = "";
+        if (isLocalhost) {
+          adviceMsg = "\n\n💡 提示: 您的自定义地址是 localhost/127.0.0.1，由于此 APP 正在云端独立沙盒环境预览，服务端无权访问您的个人电脑。如果您需要调试本地模型：\n1. 可先使用左上角设置面板的【导出代码 ZIP 包】在您本机使用 node server.ts 运行，即可本地秒连 127.0.0.1:1234 工作流！\n2. 也可以利用 Ngrok 或 LocalTunnel 将本地接口映射出公网 https 域名，再将该网址填入此处调试。\n3. 在您的云端网页预览里，即使连接失败，我们也会智能切换为云端 Gemini 进行翻译防挂，让您依然能预览系统完整的渲染排版！";
+        }
         return res.json({
           success: false,
-          message: `OpenAI host returned error status ${response.status}: ${errorText.substring(0, 100)}`,
+          isLocal: isLocalhost,
+          message: `Connection test failed: ${err.message || err}${adviceMsg}`,
         });
       }
     }
@@ -125,7 +129,7 @@ app.post("/api/test-connection", async (req, res) => {
     // Default fallback
     return res.json({
       success: true,
-      message: "Configuration format saved successfully!",
+      message: "Configuration Saved!",
     });
   } catch (error: any) {
     return res.json({
@@ -135,6 +139,58 @@ app.post("/api/test-connection", async (req, res) => {
   }
 });
 
+// Helper for fuzzy array parsing of model chat completion outputs
+function parseTranslationResponse(text: string, expectedCount: number): string[] {
+  let trimmed = text.trim();
+  
+  // Strip markdown blocks if any
+  if (trimmed.startsWith("```")) {
+    trimmed = trimmed.replace(/^```(?:json)?\n?/i, "");
+    trimmed = trimmed.replace(/\n?```$/, "");
+    trimmed = trimmed.trim();
+  }
+  
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (parsed.translations && Array.isArray(parsed.translations)) {
+      return parsed.translations;
+    }
+    if (parsed.translatedBlocks && Array.isArray(parsed.translatedBlocks)) {
+      return parsed.translatedBlocks;
+    }
+  } catch (e) {
+    console.warn("Raw JSON array parsing failed, attempting sub-array extraction...", e);
+  }
+  
+  try {
+    const startIndex = trimmed.indexOf("[");
+    const endIndex = trimmed.lastIndexOf("]");
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      const candidates = trimmed.substring(startIndex, endIndex + 1);
+      const parsed = JSON.parse(candidates);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn("Sub-array extraction match failed.", e);
+  }
+  
+  // Line division fallback
+  const lines = trimmed
+    .split(/\n+/)
+    .map(l => l.replace(/^[-*•\s\d.]+|[#"']/g, "").trim())
+    .filter(Boolean);
+  if (lines.length === expectedCount) {
+    return lines;
+  }
+  
+  return [];
+}
+
 // Real/Simulation translation router
 app.post("/api/translate", async (req, res) => {
   const { textBlocks, sourceLang, targetLang, provider, model, apiKey, endpoint } = req.body;
@@ -143,12 +199,8 @@ app.post("/api/translate", async (req, res) => {
     return res.status(400).json({ error: "Invalid textBlocks format. Array expected." });
   }
 
-  const isLocalhost = endpoint && (endpoint.includes("localhost") || endpoint.includes("127.0.0.1"));
-
-  // Check if we should use Cloud Gemini (either explicitly requested or as a fallback for local AI)
-  const useCloudGemini = provider === "gemini" || isLocalhost || (provider === "openai" && !apiKey);
-
-  if (useCloudGemini) {
+  // If user explicitly requests Cloud Gemini
+  if (provider === "gemini") {
     try {
       const ai = getGeminiClient();
       const batchSize = 25;
@@ -159,7 +211,7 @@ app.post("/api/translate", async (req, res) => {
       for (let i = 0; i < textBlocks.length; i += batchSize) {
         const batch = textBlocks.slice(i, i + batchSize);
         const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment.
+Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. Do not include markdown codeblocks packaging outside the JSON structure.
 
 Here is the input array of strings:
 ${JSON.stringify(batch)}
@@ -185,113 +237,130 @@ ${JSON.stringify(batch)}
           if (Array.isArray(parsed)) {
             translatedBlocks.push(...parsed);
           } else {
-            console.warn("Gemini batch translation did not return an array. Falling back to original texts for this batch.");
+            console.warn("Gemini didn't return a proper JSON array, falling back to batch copy.");
             translatedBlocks.push(...batch);
           }
         } catch (parseErr: any) {
-          console.error("Failed to parse Gemini batch output JSON. Raw text was:", responseText, parseErr);
-          // Fallback preserve text
+          console.error("Failed to parse Gemini model json:", parseErr);
           translatedBlocks.push(...batch);
         }
       }
 
-      console.log(`Gemini translation complete! Extracted total of ${translatedBlocks.length} translated blocks.`);
-
       return res.json({
         success: true,
         translatedBlocks,
-        fallbackUsed: (provider !== "gemini"),
-        message: provider !== "gemini" 
-          ? "Translated using Gemini fallback because the targeted local model is running on your offline machine." 
-          : "Translated successfully via Gemini Engine."
+        message: "Translated successfully via Cloud Gemini Engine."
       });
     } catch (apiErr: any) {
-      console.error("Gemini fallback translation failed:", apiErr);
+      console.error("Gemini API translation error:", apiErr);
       return res.status(500).json({ 
         error: `Gemini API Call Failed: ${apiErr.message || apiErr}` 
       });
     }
   }
 
-  // Real remote OpenAI execution
-  if (provider === "openai" && apiKey && !isLocalhost) {
-    try {
-      const targetEndpoint = endpoint || "https://api.openai.com/v1/chat/completions";
-      const targetModel = model || "gpt-4o-mini";
-      const url = targetEndpoint.endsWith("/chat/completions") ? targetEndpoint : `${targetEndpoint}/chat/completions`;
+  // Handle any custom OpenAI-compatible engine target (lmstudio, omlx, openai)
+  const targetEndpoint = endpoint || "https://api.openai.com/v1";
+  const targetModel = model || (provider === "lmstudio" ? "qwen2.5-7b-instruct" : provider === "omlx" ? "llama3.2" : "gpt-4o-mini");
+  const url = targetEndpoint.endsWith("/chat/completions") ? targetEndpoint : `${targetEndpoint}/chat/completions`;
 
-      const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
+  const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
 Input List: ${JSON.stringify(textBlocks)}`;
 
-      const apiResponse = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [
-            { role: "system", content: "You are a translation engine that outputs raw JSON list of translated text." },
-            { role: "user", content: prompt }
-          ],
-          response_format: { type: "json_object" }
-        }),
-      });
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds slice timeout
 
-      if (apiResponse.ok) {
-        const data = await apiResponse.json();
-        const contentText = data.choices?.[0]?.message?.content || "{}";
+    console.log(`Sending real API translation target: [${targetModel}] at [${url}]`);
+    const apiResponse = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        messages: [
+          { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (apiResponse.ok) {
+      const data = await apiResponse.json();
+      const contentText = data.choices?.[0]?.message?.content || "[]";
+      const list = parseTranslationResponse(contentText, textBlocks.length);
+      if (list && list.length > 0) {
+        return res.json({
+          success: true,
+          translatedBlocks: list,
+          message: `Translated via custom model: "${targetModel}"`
+        });
+      }
+    }
+    
+    throw new Error(`Model host returned status ${apiResponse.status}`);
+  } catch (err: any) {
+    console.warn(`Connection failed to custom endpoint "${url}" (${err.message || err}). Bootstrapping cloud sandbox Gemini translation fallback...`);
+    
+    // Cloud fallback so application remains functional and gorgeous dynamically
+    try {
+      const ai = getGeminiClient();
+      const batchSize = 25;
+      const translatedBlocks: string[] = [];
+
+      for (let i = 0; i < textBlocks.length; i += batchSize) {
+        const batch = textBlocks.slice(i, i + batchSize);
+        const fallbackPrompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. No markdown codeblocks wrap.
+
+Here is the input array of strings:
+${JSON.stringify(batch)}
+`;
+
+        const geminiResponse = await ai.models.generateContent({
+          model: "gemini-3.1-flash",
+          contents: fallbackPrompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.STRING
+              }
+            }
+          },
+        });
+
+        const responseText = geminiResponse.text?.trim() || "[]";
         try {
-          const parsed = JSON.parse(contentText);
-          const list = Array.isArray(parsed) ? parsed : (parsed.translations || parsed.translatedBlocks || Object.values(parsed));
-          if (Array.isArray(list)) {
-            return res.json({
-              success: true,
-              translatedBlocks: list,
-             });
+          const parsed = JSON.parse(responseText);
+          if (Array.isArray(parsed)) {
+            translatedBlocks.push(...parsed);
+          } else {
+            translatedBlocks.push(...batch);
           }
         } catch {
-          // Try regex extract
-          const arrayMatch = contentText.match(/\[\s*".*"\s*\]/s);
-          if (arrayMatch) {
-            const list = JSON.parse(arrayMatch[0]);
-            return res.json({ success: true, translatedBlocks: list });
-          }
+          translatedBlocks.push(...batch);
         }
-      } else {
-        const errText = await apiResponse.text();
-        return res.status(apiResponse.status).json({ error: `OpenAI api response error: ${errText}` });
       }
-    } catch (openaiErr: any) {
-      console.error("OpenAI model fetch failed: ", openaiErr);
-      return res.status(500).json({ error: `OpenAI connection error: ${openaiErr.message}` });
+
+      return res.json({
+        success: true,
+        translatedBlocks,
+        fallbackUsed: true,
+        message: `Connected using Cloud Gemini fallback! (Your offline local model on "localhost" is inaccessible from our cloud workspace sandbox environment. Run this tool locally or expose it via tunnel if you wish to bypass this.)`
+      });
+    } catch (gemError: any) {
+      console.error("Gemini fallback also failed:", gemError);
+      return res.status(500).json({ error: `Translation failed on both customized model and Backup Cloud Gemini backend: ${gemError.message || gemError}` });
     }
   }
-
-  // Final simulation safety net - only used as fallback if explicit simulation mode requested
-  const mockTranslations = textBlocks.map(block => {
-    // Simple basic substitution
-    if (block.toLowerCase().includes("retrieval-augmented generation")) return "检索增强生成 (RAG)";
-    if (block.toLowerCase().includes("large language model")) return "大型语言模型 (LLM)";
-    if (block.toLowerCase().includes("abstract")) return "摘要";
-    if (block.toLowerCase().includes("introduction")) return "引言";
-    if (block.toLowerCase().includes("methodology")) return "方法论";
-    if (block.toLowerCase().includes("conclusion")) return "结论";
-    if (block.toLowerCase().includes("references")) return "参考文献";
-    
-    // Add realistic translated flavor
-    return `[已翻译/Translated] ${block}`;
-  });
-
-  return res.json({
-    success: true,
-    translatedBlocks: mockTranslations,
-    simulated: true,
-    message: isLocalhost 
-      ? "Using intelligent translation simulation for local desktop preview." 
-      : "Completed translation (Simulation)."
-  });
 });
 
 // Serve frontend assets via Vite in development, or standard express static in production
