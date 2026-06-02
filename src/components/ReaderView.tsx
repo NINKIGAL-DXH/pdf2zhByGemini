@@ -546,7 +546,7 @@ export default function ReaderView({
             id="pdf-translated-canvas"
           >
             {/* Background PDF page rendering */}
-            {currentPage.backgroundUrl && viewMode !== "clean" && (
+            {currentPage.backgroundUrl && (
               <img 
                 src={currentPage.backgroundUrl} 
                 alt="PDF background" 

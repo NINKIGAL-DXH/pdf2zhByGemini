@@ -138,8 +138,8 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
 
         // Render page to canvas to generate a background image
         const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        const renderScale = 1.5; // High resolution for better visibility
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        const renderScale = 2.0; // High resolution for better visibility
         const renderViewport = page.getViewport({ scale: renderScale });
         canvas.width = renderViewport.width;
         canvas.height = renderViewport.height;
@@ -159,7 +159,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
         const items = textContent.items as any[];
 
         if (items.length === 0) {
-          backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
+          backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
           // Fallback for scanned/empty pages - dynamic and customized for the specific file name!
           extractedPages.push({
             pageNumber: pageNum,
@@ -342,7 +342,8 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             const horizOverlap = Math.max(0, Math.min(g.right, line.right) - Math.max(g.left, line.left));
             const hasHorizProximity = horizOverlap > 0 || Math.abs(g.left - line.left) < 50 || Math.abs(g.right - line.right) < 50;
 
-            if (sameCol && verticalGap > -g.height && verticalGap < line.height * 2.8 && hasHorizProximity) {
+            const gHeight = g.bottom - g.top;
+            if (sameCol && verticalGap > -gHeight && verticalGap < line.height * 2.8 && hasHorizProximity) {
               g.lines.push(line);
               g.left = Math.min(g.left, line.left);
               g.right = Math.max(g.right, line.right);
@@ -370,7 +371,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
 
         groups.forEach((g, idx) => {
           g.lines.sort((a, b) => a.top - b.top);
-          const blockText = g.lines.map(l => l.text).join(" ");
+          const blockText = g.lines.map(l => l.text).join(" ").replace(/-\s+/g, "");
 
           const pctX = Math.max(1, Math.min(95, (g.left / pageWidth) * 100));
           const pctY = Math.max(1, Math.min(95, (g.top / pageHeight) * 100));
@@ -421,7 +422,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           });
         }
         
-        backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
+        backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
 
         extractedPages.push({
           pageNumber: pageNum,

@@ -196,11 +196,13 @@ function parseTranslationResponse(text: string, expectedCount: number): string[]
 
 // Real/Simulation translation router
 app.post("/api/translate", async (req, res) => {
-  const { textBlocks, sourceLang, targetLang, provider, model, apiKey, endpoint } = req.body;
+  const { textBlocks, sourceLang, targetLang, provider, model, apiKey, endpoint, threads } = req.body;
 
   if (!textBlocks || !Array.isArray(textBlocks)) {
     return res.status(400).json({ error: "Invalid textBlocks format. Array expected." });
   }
+
+  const concurrentConfig = Math.min(Math.max(Number(threads) || 1, 1), 16);
 
   // If user explicitly requests Cloud Gemini
   if (provider === "gemini") {
@@ -214,10 +216,14 @@ app.post("/api/translate", async (req, res) => {
       for (let i = 0; i < textBlocks.length; i += batchSize) {
         const batch = textBlocks.slice(i, i + batchSize);
         try {
-          const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. Do not include markdown codeblocks packaging outside the JSON structure.
+          const prompt = `Translate the following JSON array of text segments from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Follow these rules strictly:
+1. Preserve all mathematical formulas, LaTeX, and technical variables exactly as they are.
+2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
+3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
+4. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
 
-Here is the input array of strings:
+Input List:
 ${JSON.stringify(batch)}
 `;
 
@@ -277,72 +283,97 @@ ${JSON.stringify(batch)}
   const translatedBlocks: string[] = [];
 
   try {
-    console.log(`Starting Custom API translation of ${textBlocks.length} blocks in batches of ${batchSize}...`);
+    console.log(`Starting Custom API translation of ${textBlocks.length} blocks in batches of ${batchSize} with ${concurrentConfig} threads...`);
 
+    const resultBlocks: string[] = new Array(textBlocks.length).fill("");
+    const batches: { startIdx: number, batch: string[] }[] = [];
     for (let i = 0; i < textBlocks.length; i += batchSize) {
-      const batch = textBlocks.slice(i, i + batchSize);
-      try {
-        const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
-Input List: ${JSON.stringify(batch)}`;
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s per batch is extremely comfortable
-
-        console.log(`Sending real API translation target batch starting at index ${i}: [${targetModel}] at [${url}]`);
-        
-        const requestBody: any = {
-          model: targetModel,
-          messages: [
-            { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
-            { role: "user", content: prompt }
-          ]
-        };
-
-        if (provider === "openai") {
-          requestBody.response_format = { type: "json_object" };
-        }
-
-        const apiResponse = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-          },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (apiResponse.ok) {
-          const data = await apiResponse.json();
-          const contentText = data.choices?.[0]?.message?.content || "[]";
-          const parsed = parseTranslationResponse(contentText, batch.length);
-          if (parsed && Array.isArray(parsed)) {
-            // High durability: enforce exact array dimension alignment
-            const aligned = parsed.slice(0, batch.length);
-            while (aligned.length < batch.length) {
-              aligned.push(batch[aligned.length]);
-            }
-            translatedBlocks.push(...aligned);
-          } else {
-            console.warn(`JSON alignment list parse failed for batch starting at ${i}, returning original texts for fallback.`);
-            translatedBlocks.push(...batch);
-          }
-        } else {
-          let responseErrText = "";
-          try {
-            responseErrText = await apiResponse.text();
-          } catch (_) {}
-          console.warn(`Model host returned statusCode ${apiResponse.status} for batch ending at ${i + batch.length}: ${responseErrText || "No response body"}. Utilizing original texts.`);
-          translatedBlocks.push(...batch);
-        }
-      } catch (batchErr: any) {
-        console.error(`Custom translation batch starting at index ${i} failed partially:`, batchErr.message || batchErr);
-        // Isolate error from halting the entire long document progress
-        translatedBlocks.push(...batch);
-      }
+      batches.push({ startIdx: i, batch: textBlocks.slice(i, i + batchSize) });
     }
+
+    const workerQueue = [...batches];
+
+    const worker = async () => {
+      while (workerQueue.length > 0) {
+        const { startIdx, batch } = workerQueue.shift()!;
+        try {
+          const prompt = `Translate the following JSON array of text segments from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Follow these rules strictly:
+1. Preserve all mathematical formulas, LaTeX, and technical variables exactly as they are.
+2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
+3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
+4. Return EXACTLY a raw JSON array of strings. Do not include markdown wrappers (like \`\`\`json).
+
+Input List: 
+${JSON.stringify(batch)}`;
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s per batch is extremely comfortable
+
+          console.log(`Sending real API translation target batch starting at index ${startIdx}: [${targetModel}] at [${url}]`);
+          
+          const requestBody: any = {
+            model: targetModel,
+            messages: [
+              { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
+              { role: "user", content: prompt }
+            ]
+          };
+
+          if (provider === "openai") {
+            requestBody.response_format = { type: "json_object" };
+          }
+
+          const apiResponse = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (apiResponse.ok) {
+            const data = await apiResponse.json();
+            const contentText = data.choices?.[0]?.message?.content || "[]";
+            const parsed = parseTranslationResponse(contentText, batch.length);
+            if (parsed && Array.isArray(parsed)) {
+              // High durability: enforce exact array dimension alignment
+              const aligned = parsed.slice(0, batch.length);
+              while (aligned.length < batch.length) {
+                aligned.push(batch[aligned.length]);
+              }
+              for (let j = 0; j < aligned.length; j++) resultBlocks[startIdx + j] = aligned[j];
+            } else {
+              console.warn(`JSON alignment list parse failed for batch starting at ${startIdx}, returning original texts for fallback.`);
+              for (let j = 0; j < batch.length; j++) resultBlocks[startIdx + j] = batch[j];
+            }
+          } else {
+            let responseErrText = "";
+            try {
+              responseErrText = await apiResponse.text();
+            } catch (_) {}
+            console.warn(`Model host returned statusCode ${apiResponse.status} for batch ending at ${startIdx + batch.length}: ${responseErrText || "No response body"}. Utilizing original texts.`);
+            for (let j = 0; j < batch.length; j++) resultBlocks[startIdx + j] = batch[j];
+          }
+        } catch (batchErr: any) {
+          console.error(`Custom translation batch starting at index ${startIdx} failed partially:`, batchErr.message || batchErr);
+          // Isolate error from halting the entire long document progress
+          for (let j = 0; j < batch.length; j++) resultBlocks[startIdx + j] = batch[j];
+        }
+      }
+    };
+
+    const workerPromises = [];
+    for (let i = 0; i < concurrentConfig; i++) {
+       workerPromises.push(worker());
+    }
+    await Promise.all(workerPromises);
+
+    translatedBlocks.push(...resultBlocks);
 
     if (translatedBlocks.length > 0) {
       return res.json({
@@ -375,10 +406,14 @@ Input List: ${JSON.stringify(batch)}`;
       for (let i = 0; i < textBlocks.length; i += batchSize) {
         const batch = textBlocks.slice(i, i + batchSize);
         try {
-          const fallbackPrompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. No markdown codeblocks wrap.
+          const fallbackPrompt = `Translate the following JSON array of text segments from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Follow these rules strictly:
+1. Preserve all mathematical formulas, LaTeX, and technical variables exactly as they are.
+2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
+3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
+4. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
 
-Here is the input array of strings:
+Input List:
 ${JSON.stringify(batch)}
 `;
 

@@ -695,7 +695,8 @@ export default function App() {
           provider: prov.provider,
           model: prov.model,
           apiKey: prov.apiKey,
-          endpoint: prov.endpoint
+          endpoint: prov.endpoint,
+          threads: params.threads
         })
       });
 
@@ -1766,13 +1767,22 @@ export default function App() {
                               <FileText className="w-5 h-5 text-slate-300" />
                             </div>
                             
-                            <button
-                              onClick={(e) => deleteHistoryItem(doc.id, e)}
-                              className="text-slate-400 hover:text-rose-405 p-1.5 rounded bg-white/5 hover:bg-rose-500/10 border border-white/10 hover:border-rose-500/20 hover:scale-105 transition cursor-pointer"
-                              title="Delete archive item"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); exportHighFidelityPDF(doc); }}
+                                className="text-slate-400 hover:text-blue-400 p-1.5 rounded bg-white/5 hover:bg-blue-500/10 border border-white/10 hover:border-blue-500/20 hover:scale-105 transition cursor-pointer flex items-center justify-center relative z-10"
+                                title="在访达中打开 (导出 PDF)"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => deleteHistoryItem(doc.id, e)}
+                                className="text-slate-400 hover:text-rose-405 p-1.5 rounded bg-white/5 hover:bg-rose-500/10 border border-white/10 hover:border-rose-500/20 hover:scale-105 transition cursor-pointer relative z-10"
+                                title="Delete archive item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
 
                           <div className="mt-4">
