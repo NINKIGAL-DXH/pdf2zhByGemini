@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import Markdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { PDFPage, PDFLayoutBlock } from "../types";
 import { 
   ChevronLeft, 
@@ -221,15 +224,17 @@ export default function ReaderView({
           typeConfig = "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "equation") {
           // If pure clean view, we must render the equation text itself since background figures are off
-          typeConfig = viewMode === "clean" ? "bg-transparent font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
+          typeConfig = viewMode === "clean" ? "bg-white font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "title") {
-          typeConfig = "bg-transparent font-bold text-center text-slate-900";
+          typeConfig = "bg-white font-bold text-center text-slate-900";
         } else if (type === "header") {
-          typeConfig = "bg-transparent font-semibold text-slate-850";
+          typeConfig = "bg-white font-semibold text-slate-850";
         } else if (type === "abstract") {
-          typeConfig = "bg-transparent italic text-slate-700";
+          typeConfig = "bg-white italic text-slate-700";
+        } else if (type === "footer") {
+          typeConfig = "bg-white text-[10px] text-gray-400";
         } else {
-          typeConfig = "bg-transparent text-slate-800"; // default paragraph white mask cover
+          typeConfig = "bg-white text-slate-800"; // default paragraph white mask cover
         }
       }
     } else {
@@ -505,8 +510,8 @@ export default function ReaderView({
                         <VisualFigureRenderer caption={block.originalText} />
                       ) : null
                     ) : (
-                      <span className="align-top block leading-[1.3] break-words whitespace-pre-wrap select-text">
-                        {block.originalText}
+                      <span className="align-top block leading-[1.65] break-words whitespace-pre-wrap select-text font-serif text-justify pdf-content-markdown">
+                        <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.originalText}</Markdown>
                       </span>
                     )}
 
@@ -589,12 +594,16 @@ export default function ReaderView({
                     ) : (
                       <div className="text-left w-full h-full">
                         {viewMode === "bilingual" && (
-                          <div className="text-[0.72em] leading-snug text-slate-400 italic mb-1 font-sans border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
-                            {block.originalText}
+                          <div className="text-[0.72em] leading-snug text-slate-400 italic mb-1 font-serif border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
+                            <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.originalText}</Markdown>
                           </div>
                         )}
-                        <span className="align-top block leading-[1.4] break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text text-justify">
-                          {block.translatedText || <span className="text-slate-400 italic">Translating...</span>}
+                        <span className="align-top block leading-[1.65] break-words whitespace-pre-wrap text-slate-900 font-serif tracking-normal font-normal select-text text-justify pdf-content-markdown">
+                          {block.translatedText ? (
+                            <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.translatedText}</Markdown>
+                          ) : (
+                            <span className="text-slate-400 italic font-sans">Translating...</span>
+                          )}
                         </span>
                       </div>
                     )}

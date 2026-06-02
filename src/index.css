@@ -1,10 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500;600;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "PT Serif", "Noto Serif SC", "Times New Roman", ui-serif, Georgia, Cambria, serif;
+  
   
   --color-mac-bg: #0F0F0F;
   --color-mac-dark-bg: rgb(15, 15, 15);
@@ -68,3 +70,12 @@ body {
   animation: softPulse 2s infinite ease-in-out;
 }
 
+/* Document Markdown Typography Overrides */
+.pdf-content-markdown p {
+  margin: 0;
+  display: inline;
+}
+
+.pdf-content-markdown .katex-display {
+  margin: 0.25em 0;
+}

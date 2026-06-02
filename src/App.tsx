@@ -186,7 +186,13 @@ export default function App() {
           const bw = (block.w / 100) * pageWidth;
           const bh = (block.h / 100) * pageHeight;
 
+          // Blank out the original text area so it doesn't bleed through
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+
           const text = block.translatedText || block.originalText;
+          // Strip out the markdown equations wrapping so it looks clean in canvas PDF
+          const cleanTextForCanvas = text.replace(/\$\$(.*?)\$\$/g, '$1').replace(/\$(.*?)\$/g, '$1');
           
           let isBold = block.type === "title" || block.type === "header";
           let fontSize = 10;
@@ -194,7 +200,7 @@ export default function App() {
           else if (block.type === "header") fontSize = 11;
           else if (block.type === "footer") fontSize = 8;
           else {
-            const len = text ? text.length : 0;
+            const len = cleanTextForCanvas ? cleanTextForCanvas.length : 0;
             if (len > 300) fontSize = 8.5;
             else if (len > 150) fontSize = 9;
             else fontSize = 9.5;
@@ -208,7 +214,7 @@ export default function App() {
           const lineHeight = fontSize * 1.35;
           // Regex perfectly matches contiguous alphanumeric strings (English words/numbers) as a single token, 
           // or matches any single Chinese character/punctuation as a dedicated token.
-          const tokens = text.match(/[\u4e00-\u9fa5]|\s+|[a-zA-Z0-9_\-.,!?;:'"()\[\]{}&%]+/g) || text.split("");
+          const tokens = cleanTextForCanvas.match(/[\u4e00-\u9fa5]|\s+|[a-zA-Z0-9_\-.,!?;:'"()\[\]{}&%]+/g) || cleanTextForCanvas.split("");
           
           let line = "";
           let currentY = by + 2;
