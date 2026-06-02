@@ -142,6 +142,7 @@ export default function ReaderView({
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   const [scale, setScale] = useState(0.8);
   const [outlineMode, setOutlineMode] = useState(true);
+  const [viewMode, setViewMode] = useState<"clean" | "hybrid" | "bilingual">("hybrid");
 
   const currentPage = pages[currentPageIdx] || pages[0] || { width: 612, height: 792, blocks: [], pageNumber: 1 };
 
@@ -215,9 +216,12 @@ export default function ReaderView({
         else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400";
       } else {
         // Clean Paper view (Translated)
-        if (type === "figure" || type === "equation") {
-          // Figures and equations should be transparent so background image graphics shine through
+        if (type === "figure") {
+          // Figures should be transparent so background image graphics shine through
           typeConfig = "bg-transparent text-transparent border-none pointer-events-none";
+        } else if (type === "equation") {
+          // If pure clean view, we must render the equation text itself since background figures are off
+          typeConfig = viewMode === "clean" ? "bg-white font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "title") {
           typeConfig = "bg-white font-bold text-center text-slate-900";
         } else if (type === "header") {
@@ -253,13 +257,19 @@ export default function ReaderView({
   };
 
   const getAdaptiveFontSize = (type: PDFLayoutBlock["type"], text: string) => {
+    let baseSize = 9.5;
     if (type === "title") return "13px";
     if (type === "header") return "10px";
     if (type === "footer") return "7.5px";
+    
     const len = text ? text.length : 0;
-    if (len > 300) return "7.5px";
-    if (len > 150) return "8.5px";
-    return "9.5px";
+    if (len > 300) baseSize = 7.5;
+    else if (len > 150) baseSize = 8.5;
+
+    if (viewMode === "bilingual") {
+      return `${baseSize * 0.85}px`;
+    }
+    return `${baseSize}px`;
   };
 
   return (
@@ -296,6 +306,43 @@ export default function ReaderView({
             {outlineMode ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
             <span className="font-medium">{outlineMode ? "Outline (显线框)" : "Clean (纯净版)"}</span>
           </button>
+
+          {/* View Mode Segmented Controls */}
+          <div className="flex bg-white/5 p-0.5 rounded-lg border border-white/10 select-none">
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("hybrid");
+                setOutlineMode(false); // Clear line frames to render a high-fidelity integrated slate
+              }}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition cursor-pointer ${viewMode === "hybrid" ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-white"}`}
+              title="图景融合模式：保留原PDF插图与背景，完美擦除英文并覆盖中文"
+            >
+              图景融合
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("bilingual");
+                setOutlineMode(false);
+              }}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition cursor-pointer ${viewMode === "bilingual" ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-white"}`}
+              title="双语对照模式：段落遮罩内同时呈现英文原文与中文翻译，鼠标悬停校对"
+            >
+              中英双语
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("clean");
+                setOutlineMode(false);
+              }}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition cursor-pointer ${viewMode === "clean" ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-white"}`}
+              title="纯译文纸张模式：抽离一切英文背景图，精简呈现翻译后干净排版的中文大作"
+            >
+              纯译文版
+            </button>
+          </div>
 
           {/* Interactive Zoom Scaling Slider controls */}
           <div className="flex items-center bg-white/5 rounded-lg border border-white/10 p-0.5">
@@ -498,7 +545,7 @@ export default function ReaderView({
             id="pdf-translated-canvas"
           >
             {/* Background PDF page rendering */}
-            {currentPage.backgroundUrl && (
+            {currentPage.backgroundUrl && viewMode !== "clean" && (
               <img 
                 src={currentPage.backgroundUrl} 
                 alt="PDF background" 
@@ -539,9 +586,16 @@ export default function ReaderView({
                         <VisualFigureRenderer caption={block.translatedText || block.originalText} />
                       ) : null
                     ) : (
-                      <span className="align-middle block leading-normal break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text">
-                        {block.translatedText || <span className="text-slate-400 italic">Translating...</span>}
-                      </span>
+                      <div className="text-left w-full">
+                        {viewMode === "bilingual" && (
+                          <div className="text-[0.72em] leading-normal text-slate-400 italic mb-1 font-sans border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
+                            {block.originalText}
+                          </div>
+                        )}
+                        <span className="align-middle block leading-normal break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text">
+                          {block.translatedText || <span className="text-slate-400 italic">Translating...</span>}
+                        </span>
+                      </div>
                     )}
 
                     {/* Small edit helper */}

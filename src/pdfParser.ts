@@ -153,7 +153,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           await page.render(renderContext).promise;
         }
 
-        const backgroundUrl = canvas.toDataURL("image/png");
+        const backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
 
         const textContent = await page.getTextContent();
         const items = textContent.items as any[];
@@ -297,11 +297,14 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           const bottom = pageHeight - line.y;
           const center = pageWidth / 2;
           let col: "left" | "right" | "full" = "full";
-          if (line.maxX <= center + 30) {
+          
+          // Tighten column boundaries to ensure left and right columns are strictly classified
+          if (line.maxX <= center + 15) {
             col = "left";
-          } else if (line.minX >= center - 30) {
+          } else if (line.minX >= center - 15) {
             col = "right";
           }
+          
           return {
             text: line.text,
             left: line.minX,
@@ -331,7 +334,9 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           let merged = false;
 
           for (const g of groups) {
-            const sameCol = g.col === line.col || (g.col === "full" && line.col !== "full") || (line.col === "full" && g.col !== "full");
+            // Strict Column Separation constraint (CRITICAL): Left columns, right columns, and full width zones 
+            // should NEVER merge with each other. This preserves multi-column PDF layouts and avoids masking figures/margins.
+            const sameCol = g.col === line.col;
             const verticalGap = line.top - g.bottom;
             const horizOverlap = Math.max(0, Math.min(g.right, line.right) - Math.max(g.left, line.left));
             const hasHorizProximity = horizOverlap > 0 || Math.abs(g.left - line.left) < 50 || Math.abs(g.right - line.right) < 50;
@@ -341,9 +346,6 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
               g.left = Math.min(g.left, line.left);
               g.right = Math.max(g.right, line.right);
               g.bottom = Math.max(g.bottom, line.bottom);
-              if (line.col === "full" || g.col === "full") {
-                g.col = "full";
-              }
               merged = true;
               break;
             }

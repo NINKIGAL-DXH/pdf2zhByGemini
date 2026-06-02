@@ -213,38 +213,44 @@ app.post("/api/translate", async (req, res) => {
 
       for (let i = 0; i < textBlocks.length; i += batchSize) {
         const batch = textBlocks.slice(i, i + batchSize);
-        const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+        try {
+          const prompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
 Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. Do not include markdown codeblocks packaging outside the JSON structure.
 
 Here is the input array of strings:
 ${JSON.stringify(batch)}
 `;
 
-        const geminiResponse = await ai.models.generateContent({
-          model: "gemini-3.1-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.STRING
+          const geminiResponse = await ai.models.generateContent({
+            model: "gemini-3.1-flash",
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.STRING
+                }
               }
-            }
-          },
-        });
+            },
+          });
 
-        const responseText = geminiResponse.text?.trim() || "[]";
-        try {
+          const responseText = geminiResponse.text?.trim() || "[]";
           const parsed = JSON.parse(responseText);
           if (Array.isArray(parsed)) {
-            translatedBlocks.push(...parsed);
+            // High durability: enforce exact array dimension alignment
+            const aligned = parsed.slice(0, batch.length);
+            while (aligned.length < batch.length) {
+              aligned.push(batch[aligned.length]);
+            }
+            translatedBlocks.push(...aligned);
           } else {
             console.warn("Gemini didn't return a proper JSON array, falling back to batch copy.");
             translatedBlocks.push(...batch);
           }
-        } catch (parseErr: any) {
-          console.error("Failed to parse Gemini model json:", parseErr);
+        } catch (batchErr: any) {
+          console.error(`Cloud Gemini translation batch starting at index ${i} failed partially:`, batchErr.message || batchErr);
+          // Gracefully isolate batch translation error to prevent entire process halt on long PDFs
           translatedBlocks.push(...batch);
         }
       }
@@ -255,7 +261,7 @@ ${JSON.stringify(batch)}
         message: "Translated successfully via Cloud Gemini Engine."
       });
     } catch (apiErr: any) {
-      console.error("Gemini API translation error:", apiErr);
+      console.error("Gemini API global initialization failed:", apiErr);
       return res.status(500).json({ 
         error: `Gemini API Call Failed: ${apiErr.message || apiErr}` 
       });
@@ -275,54 +281,66 @@ ${JSON.stringify(batch)}
 
     for (let i = 0; i < textBlocks.length; i += batchSize) {
       const batch = textBlocks.slice(i, i + batchSize);
-      const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
+      try {
+        const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
 Input List: ${JSON.stringify(batch)}`;
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s per batch is extremely comfortable
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s per batch is extremely comfortable
 
-      console.log(`Sending real API translation target batch starting at index ${i}: [${targetModel}] at [${url}]`);
-      
-      const requestBody: any = {
-        model: targetModel,
-        messages: [
-          { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
-          { role: "user", content: prompt }
-        ]
-      };
+        console.log(`Sending real API translation target batch starting at index ${i}: [${targetModel}] at [${url}]`);
+        
+        const requestBody: any = {
+          model: targetModel,
+          messages: [
+            { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
+            { role: "user", content: prompt }
+          ]
+        };
 
-      if (provider === "openai") {
-        requestBody.response_format = { type: "json_object" };
-      }
+        if (provider === "openai") {
+          requestBody.response_format = { type: "json_object" };
+        }
 
-      const apiResponse = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      });
+        const apiResponse = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (apiResponse.ok) {
-        const data = await apiResponse.json();
-        const contentText = data.choices?.[0]?.message?.content || "[]";
-        const list = parseTranslationResponse(contentText, batch.length);
-        if (list && list.length > 0) {
-          translatedBlocks.push(...list);
+        if (apiResponse.ok) {
+          const data = await apiResponse.json();
+          const contentText = data.choices?.[0]?.message?.content || "[]";
+          const list = parseTranslationResponse(contentText, batch.length);
+          if (list && list.length > 0) {
+            // High durability: enforce exact array dimension alignment
+            const aligned = list.slice(0, batch.length);
+            while (aligned.length < batch.length) {
+              aligned.push(batch[aligned.length]);
+            }
+            translatedBlocks.push(...aligned);
+          } else {
+            console.warn(`JSON alignment list parse failed for batch starting at ${i}, returning original texts for fallback.`);
+            translatedBlocks.push(...batch);
+          }
         } else {
-          console.warn(`JSON alignment list parse failed for batch starting at ${i}, returning original texts for fallback.`);
+          let responseErrText = "";
+          try {
+            responseErrText = await apiResponse.text();
+          } catch (_) {}
+          console.warn(`Model host returned statusCode ${apiResponse.status} for batch ending at ${i + batch.length}: ${responseErrText || "No response body"}. Utilizing original texts.`);
           translatedBlocks.push(...batch);
         }
-      } else {
-        let responseErrText = "";
-        try {
-          responseErrText = await apiResponse.text();
-        } catch (_) {}
-        throw new Error(`Model host returned statusCode ${apiResponse.status}: ${responseErrText || "No response body"}`);
+      } catch (batchErr: any) {
+        console.error(`Custom translation batch starting at index ${i} failed partially:`, batchErr.message || batchErr);
+        // Isolate error from halting the entire long document progress
+        translatedBlocks.push(...batch);
       }
     }
 
@@ -337,7 +355,7 @@ Input List: ${JSON.stringify(batch)}`;
     }
 
   } catch (err: any) {
-    console.warn(`Connection failed to custom endpoint "${url}" (${err.message || err}). Bootstrapping cloud sandbox Gemini translation fallback...`);
+    console.warn(`Fallback triggered because of global custom endpoint failure: "${url}" (${err.message || err}). Bootstrapping cloud sandbox Gemini translation fallback...`);
     
     // Check if cloud fallback API key is actually set before attempting to load getGeminiClient()
     const hasGeminiKey = !!process.env.GEMINI_API_KEY;
@@ -356,36 +374,42 @@ Input List: ${JSON.stringify(batch)}`;
 
       for (let i = 0; i < textBlocks.length; i += batchSize) {
         const batch = textBlocks.slice(i, i + batchSize);
-        const fallbackPrompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+        try {
+          const fallbackPrompt = `Translate the following array of text segments from language "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
 Keep the output array in the exact same index order and length. Return EXACTLY a JSON array of strings corresponding to each translated segment. No markdown codeblocks wrap.
 
 Here is the input array of strings:
 ${JSON.stringify(batch)}
 `;
 
-        const geminiResponse = await ai.models.generateContent({
-          model: "gemini-3.1-flash",
-          contents: fallbackPrompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.STRING
+          const geminiResponse = await ai.models.generateContent({
+            model: "gemini-3.1-flash",
+            contents: fallbackPrompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.STRING
+                }
               }
-            }
-          },
-        });
+            },
+          });
 
-        const responseText = geminiResponse.text?.trim() || "[]";
-        try {
+          const responseText = geminiResponse.text?.trim() || "[]";
           const parsed = JSON.parse(responseText);
           if (Array.isArray(parsed)) {
-            translatedBlocks.push(...parsed);
+            // High durability: enforce exact array dimension alignment
+            const aligned = parsed.slice(0, batch.length);
+            while (aligned.length < batch.length) {
+              aligned.push(batch[aligned.length]);
+            }
+            translatedBlocks.push(...aligned);
           } else {
             translatedBlocks.push(...batch);
           }
-        } catch {
+        } catch (fErr: any) {
+          console.error(`Gemini fallback batch starting at index ${i} failed partially:`, fErr.message || fErr);
           translatedBlocks.push(...batch);
         }
       }
