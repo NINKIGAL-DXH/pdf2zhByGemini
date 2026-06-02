@@ -200,7 +200,7 @@ export default function App() {
             else fontSize = 9.5;
           }
 
-          ctx.fillStyle = block.type === "equation" ? "#581c87" : "#0f172a"; // classic deep ink toner/slate color
+          ctx.fillStyle = "#0f172a"; // classic deep ink toner/slate color
           ctx.font = `${isBold ? "bold" : "normal"} ${fontSize}px "SF Pro SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, sans-serif`;
           ctx.textBaseline = "top";
           ctx.textAlign = "left";
