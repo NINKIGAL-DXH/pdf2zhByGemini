@@ -221,15 +221,15 @@ export default function ReaderView({
           typeConfig = "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "equation") {
           // If pure clean view, we must render the equation text itself since background figures are off
-          typeConfig = viewMode === "clean" ? "bg-white font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
+          typeConfig = viewMode === "clean" ? "bg-transparent font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "title") {
-          typeConfig = "bg-white font-bold text-center text-slate-900";
+          typeConfig = "bg-transparent font-bold text-center text-slate-900";
         } else if (type === "header") {
-          typeConfig = "bg-white font-semibold text-slate-850";
+          typeConfig = "bg-transparent font-semibold text-slate-850";
         } else if (type === "abstract") {
-          typeConfig = "bg-white italic text-slate-700";
+          typeConfig = "bg-transparent italic text-slate-700";
         } else {
-          typeConfig = "bg-white text-slate-800"; // default paragraph white mask cover
+          typeConfig = "bg-transparent text-slate-800"; // default paragraph white mask cover
         }
       }
     } else {
@@ -258,16 +258,17 @@ export default function ReaderView({
 
   const getAdaptiveFontSize = (type: PDFLayoutBlock["type"], text: string) => {
     let baseSize = 9.5;
-    if (type === "title") return "13px";
-    if (type === "header") return "10px";
-    if (type === "footer") return "7.5px";
+    if (type === "title") return "14px";
+    if (type === "header") return "11px";
+    if (type === "footer") return "8px";
     
     const len = text ? text.length : 0;
-    if (len > 300) baseSize = 7.5;
-    else if (len > 150) baseSize = 8.5;
+    if (len > 350) baseSize = 8;
+    else if (len > 200) baseSize = 8.5;
+    else baseSize = 10;
 
     if (viewMode === "bilingual") {
-      return `${baseSize * 0.85}px`;
+      return `${baseSize * 0.9}px`;
     }
     return `${baseSize}px`;
   };
@@ -404,15 +405,15 @@ export default function ReaderView({
                 params: { sourceLang, targetLang }
               })}
               disabled={isExportingPDF}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition border cursor-pointer ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 text-[11px] font-medium rounded transition border cursor-pointer ${
                 isExportingPDF 
                   ? "bg-slate-800 text-slate-500 border-slate-705 pointer-events-none animate-pulse" 
-                  : "text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20 hover:border-blue-500/40"
+                  : "bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500 shadow-sm"
               }`}
               title="Compile and download layout-preserved Translated PDF (高保真排版PDF导出)"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{isExportingPDF ? "Exporting PDF..." : "Export PDF (高保真 PDF)"}</span>
+              <span>{isExportingPDF ? "Exporting PDF..." : "Export Translated PDF"}</span>
             </button>
           )}
 

@@ -153,12 +153,13 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           await page.render(renderContext).promise;
         }
 
-        const backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
+        let backgroundUrl = "";
 
         const textContent = await page.getTextContent();
         const items = textContent.items as any[];
 
         if (items.length === 0) {
+          backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
           // Fallback for scanned/empty pages - dynamic and customized for the specific file name!
           extractedPages.push({
             pageNumber: pageNum,
@@ -395,12 +396,30 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             id: `p-${pageNum}-b-${idx}`,
             type: blockType,
             originalText: cleanedText,
-            x: Math.round(pctX),
-            y: Math.round(pctY),
-            w: Math.round(pctW),
-            h: Math.round(pctH),
+            x: Number(pctX.toFixed(2)),
+            y: Number(pctY.toFixed(2)),
+            w: Number(pctW.toFixed(2)),
+            h: Number(pctH.toFixed(2)),
           });
         });
+
+        // Now that we have blocks, we erase text from the canvas to produce a clean background!
+        if (ctx) {
+          ctx.fillStyle = "#ffffff";
+          blocks.forEach(block => {
+            if (block.type !== "figure" && block.type !== "equation") {
+              const bx = (block.x / 100) * canvas.width;
+              const by = (block.y / 100) * canvas.height;
+              const bw = (block.w / 100) * canvas.width;
+              const bh = (block.h / 100) * canvas.height;
+              
+              // We expand the box slightly to catch anti-aliasing edges of the text
+              ctx.fillRect(bx - 3, by - 3, bw + 6, bh + 6);
+            }
+          });
+        }
+        
+        backgroundUrl = canvas.toDataURL("image/jpeg", 0.65);
 
         extractedPages.push({
           pageNumber: pageNum,

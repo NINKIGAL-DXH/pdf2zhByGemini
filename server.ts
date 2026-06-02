@@ -236,8 +236,8 @@ ${JSON.stringify(batch)}
           });
 
           const responseText = geminiResponse.text?.trim() || "[]";
-          const parsed = JSON.parse(responseText);
-          if (Array.isArray(parsed)) {
+          const parsed = parseTranslationResponse(responseText, batch.length);
+          if (parsed && Array.isArray(parsed)) {
             // High durability: enforce exact array dimension alignment
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
@@ -317,10 +317,10 @@ Input List: ${JSON.stringify(batch)}`;
         if (apiResponse.ok) {
           const data = await apiResponse.json();
           const contentText = data.choices?.[0]?.message?.content || "[]";
-          const list = parseTranslationResponse(contentText, batch.length);
-          if (list && list.length > 0) {
+          const parsed = parseTranslationResponse(contentText, batch.length);
+          if (parsed && Array.isArray(parsed)) {
             // High durability: enforce exact array dimension alignment
-            const aligned = list.slice(0, batch.length);
+            const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
               aligned.push(batch[aligned.length]);
             }
@@ -397,8 +397,8 @@ ${JSON.stringify(batch)}
           });
 
           const responseText = geminiResponse.text?.trim() || "[]";
-          const parsed = JSON.parse(responseText);
-          if (Array.isArray(parsed)) {
+          const parsed = parseTranslationResponse(responseText, batch.length);
+          if (parsed && Array.isArray(parsed)) {
             // High durability: enforce exact array dimension alignment
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {

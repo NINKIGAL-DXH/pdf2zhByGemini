@@ -176,8 +176,8 @@ export default function App() {
 
         // 2. Draw & overlay each text block contextually
         page.blocks.forEach((block) => {
-          if (block.type === "figure") {
-            // Figures should never be covered, allowing original embedded graphics to show through
+          if (block.type === "figure" || block.type === "equation") {
+            // Figures and equations remain untouched to preserve native PDF rasterization underneath
             return;
           }
 
@@ -185,10 +185,6 @@ export default function App() {
           const by = (block.y / 100) * pageHeight;
           const bw = (block.w / 100) * pageWidth;
           const bh = (block.h / 100) * pageHeight;
-
-          // Mask the underlying English text using matching paper-white background mask fills
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
 
           const text = block.translatedText || block.originalText;
           
