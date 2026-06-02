@@ -499,13 +499,13 @@ export default function ReaderView({
                   onMouseLeave={() => setHoveredBlockId(null)}
                   onClick={() => startEditing(block)}
                 >
-                  <div className="p-1 w-full h-full overflow-y-auto overflow-x-hidden pr-0.5 style-scrollbar flex flex-col justify-center">
+                  <div className="p-0.5 w-full h-full overflow-y-auto overflow-x-hidden style-scrollbar flex flex-col justify-start">
                     {block.type === "figure" ? (
                       outlineMode ? (
                         <VisualFigureRenderer caption={block.originalText} />
                       ) : null
                     ) : (
-                      <span className="align-middle block leading-normal break-words whitespace-pre-wrap select-text">
+                      <span className="align-top block leading-[1.3] break-words whitespace-pre-wrap select-text">
                         {block.originalText}
                       </span>
                     )}
@@ -581,19 +581,19 @@ export default function ReaderView({
                   onMouseLeave={() => setHoveredBlockId(null)}
                   onClick={() => startEditing(block)}
                 >
-                  <div className="p-1 w-full h-full overflow-y-auto overflow-x-hidden pr-0.5 style-scrollbar flex flex-col justify-center">
+                  <div className="p-0.5 w-full h-full overflow-y-auto overflow-x-hidden style-scrollbar flex flex-col justify-start">
                     {block.type === "figure" ? (
                       outlineMode ? (
                         <VisualFigureRenderer caption={block.translatedText || block.originalText} />
                       ) : null
                     ) : (
-                      <div className="text-left w-full">
+                      <div className="text-left w-full h-full">
                         {viewMode === "bilingual" && (
-                          <div className="text-[0.72em] leading-normal text-slate-400 italic mb-1 font-sans border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
+                          <div className="text-[0.72em] leading-snug text-slate-400 italic mb-1 font-sans border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
                             {block.originalText}
                           </div>
                         )}
-                        <span className="align-middle block leading-normal break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text">
+                        <span className="align-top block leading-[1.4] break-words whitespace-pre-wrap text-slate-900 font-sans tracking-wide font-normal select-text text-justify">
                           {block.translatedText || <span className="text-slate-400 italic">Translating...</span>}
                         </span>
                       </div>

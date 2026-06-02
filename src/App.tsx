@@ -206,12 +206,15 @@ export default function App() {
           ctx.textAlign = "left";
 
           const lineHeight = fontSize * 1.35;
-          const chars = text.split("");
+          // Regex perfectly matches contiguous alphanumeric strings (English words/numbers) as a single token, 
+          // or matches any single Chinese character/punctuation as a dedicated token.
+          const tokens = text.match(/[\u4e00-\u9fa5]|\s+|[a-zA-Z0-9_\-.,!?;:'"()\[\]{}&%]+/g) || text.split("");
+          
           let line = "";
           let currentY = by + 2;
 
-          for (let n = 0; n < chars.length; n++) {
-            const testLine = line + chars[n];
+          for (let n = 0; n < tokens.length; n++) {
+            const testLine = line + tokens[n];
             const metrics = ctx.measureText(testLine);
             const testWidth = metrics.width;
             
@@ -219,15 +222,15 @@ export default function App() {
               if (currentY + lineHeight > by + bh + 4) {
                 break;
               }
-              ctx.fillText(line, bx + 2, currentY);
-              line = chars[n];
+              ctx.fillText(line.trim(), bx + 2, currentY);
+              line = tokens[n].trimStart(); // start new line with the current token
               currentY += lineHeight;
             } else {
               line = testLine;
             }
           }
           if (line && currentY <= by + bh + 4) {
-            ctx.fillText(line, bx + 2, currentY);
+            ctx.fillText(line.trim(), bx + 2, currentY);
           }
         });
 

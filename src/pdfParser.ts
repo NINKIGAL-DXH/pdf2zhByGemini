@@ -342,11 +342,13 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             const horizOverlap = Math.max(0, Math.min(g.right, line.right) - Math.max(g.left, line.left));
             const hasHorizProximity = horizOverlap > 0 || Math.abs(g.left - line.left) < 50 || Math.abs(g.right - line.right) < 50;
 
-            if (sameCol && verticalGap >= -12 && verticalGap < line.height * 2.5 && hasHorizProximity) {
+            if (sameCol && verticalGap > -g.height && verticalGap < line.height * 2.8 && hasHorizProximity) {
               g.lines.push(line);
               g.left = Math.min(g.left, line.left);
               g.right = Math.max(g.right, line.right);
               g.bottom = Math.max(g.bottom, line.bottom);
+              // Also expand top bounds if this line happens to be higher
+              g.top = Math.min(g.top, line.top);
               merged = true;
               break;
             }
@@ -386,7 +388,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             blockType = "abstract";
           } else if (/^[\d\s+\-*\/=()a-zA-Z_^{}\\]+$/.test(cleanedText) && cleanedText.includes("=") && cleanedText.length < 100) {
             blockType = "equation";
-          } else if (cleanedText.includes("Figure") || cleanedText.includes("Fig.") || cleanedText.includes("Table") || cleanedText.includes("Tab.")) {
+          } else if (/^(Figure|Fig\.|Table|Tab\.)/i.test(cleanedText)) {
             blockType = "figure";
           } else if (pctY > 88 && cleanedText.length < 120) {
             blockType = "footer";
@@ -414,7 +416,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
               const bh = (block.h / 100) * canvas.height;
               
               // We expand the box slightly to catch anti-aliasing edges of the text
-              ctx.fillRect(bx - 3, by - 3, bw + 6, bh + 6);
+              ctx.fillRect(bx - 1.5, by - 1.5, bw + 3, bh + 3);
             }
           });
         }
