@@ -1,7 +1,10 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -269,23 +272,31 @@ Input List: ${JSON.stringify(textBlocks)}`;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds slice timeout
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased to 90 seconds to prevent local model timeouts on slow hardware
 
     console.log(`Sending real API translation target: [${targetModel}] at [${url}]`);
+    
+    // Construct request body compatibly
+    const requestBody: any = {
+      model: targetModel,
+      messages: [
+        { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
+        { role: "user", content: prompt }
+      ]
+    };
+
+    // Only apply response_format: JSON if provider is openai to avoid compatibility issues with local/older Ollama & LM Studio platforms
+    if (provider === "openai") {
+      requestBody.response_format = { type: "json_object" };
+    }
+
     const apiResponse = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
-      body: JSON.stringify({
-        model: targetModel,
-        messages: [
-          { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
-          { role: "user", content: prompt }
-        ],
-        response_format: { type: "json_object" }
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
@@ -304,10 +315,23 @@ Input List: ${JSON.stringify(textBlocks)}`;
       }
     }
     
-    throw new Error(`Model host returned status ${apiResponse.status}`);
+    let responseErrText = "";
+    try {
+      responseErrText = await apiResponse.text();
+    } catch (_) {}
+    throw new Error(`Model host returned statusCode ${apiResponse.status}: ${responseErrText || "No response body"}`);
   } catch (err: any) {
     console.warn(`Connection failed to custom endpoint "${url}" (${err.message || err}). Bootstrapping cloud sandbox Gemini translation fallback...`);
     
+    // Check if cloud fallback API key is actually set before attempting to load getGeminiClient()
+    const hasGeminiKey = !!process.env.GEMINI_API_KEY;
+    if (!hasGeminiKey) {
+      console.warn("Cloud Gemini API Key is not configured in Settings. Skipping fallback to show raw connection error.");
+      return res.status(500).json({ 
+        error: `Custom model connection failed: ${err.message || "Timeout / connection refused"}. (Additional details: GEMINI_API_KEY environment variable is not configured, so cloud fallback is disabled.)`
+      });
+    }
+
     // Cloud fallback so application remains functional and gorgeous dynamically
     try {
       const ai = getGeminiClient();
