@@ -118,6 +118,8 @@ interface ReaderViewProps {
   onClose: () => void;
   onUpdateBlock: (pageIdx: number, blockId: string, newText: string) => void;
   onReTranslateBlock: (pageIdx: number, blockId: string, text: string) => Promise<any>;
+  exportHighFidelityPDF?: (doc: any) => void;
+  isExportingPDF?: boolean;
 }
 
 export default function ReaderView({
@@ -128,6 +130,8 @@ export default function ReaderView({
   onClose,
   onUpdateBlock,
   onReTranslateBlock,
+  exportHighFidelityPDF,
+  isExportingPDF,
 }: ReaderViewProps) {
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
@@ -345,6 +349,26 @@ export default function ReaderView({
         </div>
 
         <div className="flex items-center space-x-3">
+          {exportHighFidelityPDF && (
+            <button
+              onClick={() => exportHighFidelityPDF({
+                fileName,
+                pages,
+                params: { sourceLang, targetLang }
+              })}
+              disabled={isExportingPDF}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition border cursor-pointer ${
+                isExportingPDF 
+                  ? "bg-slate-800 text-slate-500 border-slate-705 pointer-events-none animate-pulse" 
+                  : "text-blue-300 hover:text-white bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20 hover:border-blue-500/40"
+              }`}
+              title="Compile and download layout-preserved Translated PDF (高保真排版PDF导出)"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{isExportingPDF ? "Exporting PDF..." : "Export PDF (高保真 PDF)"}</span>
+            </button>
+          )}
+
           <button
             onClick={() => {
               // Create mock compiled text file download

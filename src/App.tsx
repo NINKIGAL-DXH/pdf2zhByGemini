@@ -114,6 +114,148 @@ export default function App() {
   const [translationWarning, setTranslationWarning] = useState<string | null>(null);
   const [translationError, setTranslationError] = useState<string | null>(null);
 
+  // State and compiler for high-fidelity PDF export
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+
+  const exportHighFidelityPDF = async (doc: TranslatedDoc) => {
+    if (isExportingPDF) return;
+    setIsExportingPDF(true);
+    
+    const pushLog = (txt: string) => {
+      setTerminalLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${txt}`]);
+    };
+
+    pushLog("[pdf2zh] Initializing high-fidelity layout preservation PDF compiler...");
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4"
+      });
+
+      for (let pIdx = 0; pIdx < doc.pages.length; pIdx++) {
+        const page = doc.pages[pIdx];
+        const pageWidth = page.width || 595;
+        const pageHeight = page.height || 842;
+        
+        pushLog(`[pdf2zh] Drawing raw graphical structures for Page ${page.pageNumber}/${doc.pages.length}...`);
+
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Canvas 2D context retrieval failed.");
+
+        const renderScale = 2.0; // scale up by 2x for printing-press high resolution text rendering
+        canvas.width = pageWidth * renderScale;
+        canvas.height = pageHeight * renderScale;
+        ctx.scale(renderScale, renderScale);
+
+        // 1. Render Page Background Graphic Frame
+        if (page.backgroundUrl) {
+          await new Promise<void>((resolve) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0, pageWidth, pageHeight);
+              resolve();
+            };
+            img.onerror = () => {
+              // Draw safe plain fallback paper frame if image load fails
+              ctx.fillStyle = "#ffffff";
+              ctx.fillRect(0, 0, pageWidth, pageHeight);
+              resolve();
+            };
+            img.src = page.backgroundUrl!;
+          });
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, pageWidth, pageHeight);
+        }
+
+        // 2. Draw & overlay each text block contextually
+        page.blocks.forEach((block) => {
+          if (block.type === "figure") {
+            // Figures should never be covered, allowing original embedded graphics to show through
+            return;
+          }
+
+          const bx = (block.x / 100) * pageWidth;
+          const by = (block.y / 100) * pageHeight;
+          const bw = (block.w / 100) * pageWidth;
+          const bh = (block.h / 100) * pageHeight;
+
+          // Mask the underlying English text using matching paper-white background mask fills
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+
+          const text = block.translatedText || block.originalText;
+          
+          let isBold = block.type === "title" || block.type === "header";
+          let fontSize = 10;
+          if (block.type === "title") fontSize = 16;
+          else if (block.type === "header") fontSize = 11;
+          else if (block.type === "footer") fontSize = 8;
+          else {
+            const len = text ? text.length : 0;
+            if (len > 300) fontSize = 8.5;
+            else if (len > 150) fontSize = 9;
+            else fontSize = 9.5;
+          }
+
+          ctx.fillStyle = block.type === "equation" ? "#581c87" : "#0f172a"; // classic deep ink toner/slate color
+          ctx.font = `${isBold ? "bold" : "normal"} ${fontSize}px "SF Pro SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, sans-serif`;
+          ctx.textBaseline = "top";
+          ctx.textAlign = "left";
+
+          const lineHeight = fontSize * 1.35;
+          const chars = text.split("");
+          let line = "";
+          let currentY = by + 2;
+
+          for (let n = 0; n < chars.length; n++) {
+            const testLine = line + chars[n];
+            const metrics = ctx.measureText(testLine);
+            const testWidth = metrics.width;
+            
+            if (testWidth > bw - 4 && n > 0) {
+              if (currentY + lineHeight > by + bh + 4) {
+                break;
+              }
+              ctx.fillText(line, bx + 2, currentY);
+              line = chars[n];
+              currentY += lineHeight;
+            } else {
+              line = testLine;
+            }
+          }
+          if (line && currentY <= by + bh + 4) {
+            ctx.fillText(line, bx + 2, currentY);
+          }
+        });
+
+        // Add page to PDF
+        const imgData = canvas.toDataURL("image/jpeg", 0.95);
+        if (pIdx > 0) {
+          pdf.addPage([pageWidth, pageHeight], "portrait");
+        } else {
+          pdf.deletePage(1);
+          pdf.addPage([pageWidth, pageHeight], "portrait");
+        }
+        pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, pageHeight);
+      }
+
+      pdf.save(`${doc.fileName.replace(".pdf", "")}_translated.pdf`);
+      pushLog("[pdf2zh] High-fidelity layout-preserving translated PDF downloaded successfully!");
+    } catch (err: any) {
+      console.error("High-fidelity PDF export failed", err);
+      pushLog(`[pdf2zh] [ERROR] High-fidelity PDF export failed: ${err.message || err}`);
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
   // History database
   const [history, setHistory] = useState<TranslatedDoc[]>([]);
 
@@ -747,6 +889,8 @@ export default function App() {
         onClose={() => setActiveReaderDoc(null)}
         onUpdateBlock={(pageIdx, blockId, newText) => handleUpdateBlockInDocReader(activeReaderDoc.id, pageIdx, blockId, newText)}
         onReTranslateBlock={(pageIdx, blockId, text) => handleReTranslateInDocReader(activeReaderDoc.id, pageIdx, blockId, text)}
+        exportHighFidelityPDF={exportHighFidelityPDF}
+        isExportingPDF={isExportingPDF}
       />
     );
   }
@@ -1374,20 +1518,16 @@ export default function App() {
 
                           <div className="flex flex-wrap gap-2 justify-end w-full md:w-auto">
                             <button
-                              onClick={() => {
-                                // Monolingual translated PDF mockup generator
-                                const content = activeTranslatingDoc.pages.map(p => `PAGE ${p.pageNumber}\n` + p.blocks.map(b => b.translatedText || b.originalText).join("\n")).join("\n\n");
-                                const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement("a");
-                                a.href = url;
-                                a.download = `${activeTranslatingDoc.fileName.replace(".pdf", "")}_translated.pdf`;
-                                a.click();
-                              }}
-                              className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white rounded text-xs border border-white/10 font-medium transition flex items-center space-x-1 cursor-pointer"
+                              onClick={() => exportHighFidelityPDF(activeTranslatingDoc)}
+                              disabled={isExportingPDF}
+                              className={`px-3 py-1.5 rounded text-xs border font-medium transition flex items-center space-x-1 cursor-pointer ${
+                                isExportingPDF 
+                                  ? "bg-slate-800 text-slate-500 border-slate-700 pointer-events-none animate-pulse" 
+                                  : "bg-white/5 hover:bg-white/10 text-white border-white/10"
+                              }`}
                             >
                               <Download className="w-3.5 h-3.5" />
-                              <span>Download Mono PDF</span>
+                              <span>{isExportingPDF ? "Exporting PDF..." : "Download Mono PDF"}</span>
                             </button>
 
                             <button

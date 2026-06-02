@@ -281,74 +281,101 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           }
         });
 
-        // Classify each rawLine segment into columns: "left" | "right" | "full"
-        interface ClassifiedLine extends LineSegment {
+        // Group rawLines into 2D block shapes based on spatial proximity
+        interface LineRect {
+          text: string;
+          left: number;
+          right: number;
+          top: number;
+          bottom: number;
+          height: number;
           col: "left" | "right" | "full";
         }
 
-        const classifiedLines: ClassifiedLine[] = rawLines.map((line) => {
-          let col: "left" | "right" | "full" = "full";
+        const lineRects: LineRect[] = rawLines.map(line => {
+          const top = pageHeight - (line.y + line.height);
+          const bottom = pageHeight - line.y;
           const center = pageWidth / 2;
-          
-          if (line.maxX <= center + 40) {
+          let col: "left" | "right" | "full" = "full";
+          if (line.maxX <= center + 30) {
             col = "left";
-          } else if (line.minX >= center - 40) {
+          } else if (line.minX >= center - 30) {
             col = "right";
           }
-          
-          return { ...line, col };
+          return {
+            text: line.text,
+            left: line.minX,
+            right: line.maxX,
+            top,
+            bottom,
+            height: line.height,
+            col
+          };
         });
 
-        // Sort classified lines in a logical multi-column reading order:
-        // Higher elements first, but side-by-side elements sorted left-column before right-column
-        classifiedLines.sort((a, b) => {
-          const yGap = a.y - b.y;
-          // 40 points represents quite significant vertical layout distance (approx 4-5 text rows)
-          if (Math.abs(yGap) > 40) {
-            return b.y - a.y; // Top to bottom first
+        interface BlockGroup {
+          lines: LineRect[];
+          left: number;
+          right: number;
+          top: number;
+          bottom: number;
+          col: "left" | "right" | "full";
+        }
+
+        const groups: BlockGroup[] = [];
+
+        // Sort lineRects top-to-bottom
+        lineRects.sort((a, b) => a.top - b.top);
+
+        lineRects.forEach(line => {
+          let merged = false;
+
+          for (const g of groups) {
+            const sameCol = g.col === line.col || (g.col === "full" && line.col !== "full") || (line.col === "full" && g.col !== "full");
+            const verticalGap = line.top - g.bottom;
+            const horizOverlap = Math.max(0, Math.min(g.right, line.right) - Math.max(g.left, line.left));
+            const hasHorizProximity = horizOverlap > 0 || Math.abs(g.left - line.left) < 50 || Math.abs(g.right - line.right) < 50;
+
+            if (sameCol && verticalGap >= -12 && verticalGap < line.height * 2.5 && hasHorizProximity) {
+              g.lines.push(line);
+              g.left = Math.min(g.left, line.left);
+              g.right = Math.max(g.right, line.right);
+              g.bottom = Math.max(g.bottom, line.bottom);
+              if (line.col === "full" || g.col === "full") {
+                g.col = "full";
+              }
+              merged = true;
+              break;
+            }
           }
-          
-          // Side-by-side line segments (horizontal banding):
-          // full spans first, then left column, then right column
-          if (a.col !== b.col) {
-            const priority = { "full": 1, "left": 2, "right": 3 };
-            return priority[a.col] - priority[b.col];
+
+          if (!merged) {
+            groups.push({
+              lines: [line],
+              left: line.left,
+              right: line.right,
+              top: line.top,
+              bottom: line.bottom,
+              col: line.col
+            });
           }
-          
-          if (a.y !== b.y) {
-            return b.y - a.y;
-          }
-          return a.minX - b.minX;
         });
 
-        // Group consecutive lines of the same column classification into paragraphs/headers
         const blocks: ExtractedBlock[] = [];
-        let currentBlockLines: ClassifiedLine[] = [];
 
-        const flushBlock = (index: number) => {
-          if (currentBlockLines.length === 0) return;
+        groups.forEach((g, idx) => {
+          g.lines.sort((a, b) => a.top - b.top);
+          const blockText = g.lines.map(l => l.text).join(" ");
 
-          // Calculate unified coordinates
-          const minX = Math.min(...currentBlockLines.map((l) => l.minX));
-          const maxX = Math.max(...currentBlockLines.map((l) => l.maxX));
-          const minY = Math.min(...currentBlockLines.map((l) => l.y));
-          const maxY = Math.max(...currentBlockLines.map((l) => l.y + l.height));
+          const pctX = Math.max(1, Math.min(95, (g.left / pageWidth) * 100));
+          const pctY = Math.max(1, Math.min(95, (g.top / pageHeight) * 100));
+          const pctW = Math.max(5, Math.min(98, ((g.right - g.left) / pageWidth) * 100));
+          const pctH = Math.max(2, Math.min(98, ((g.bottom - g.top) / pageHeight) * 100));
 
-          const segmentText = currentBlockLines.map((l) => l.text).join(" ");
-
-          // Convert coordinates to percentage with buffer guidelines
-          const pctX = Math.max(1, Math.min(95, (minX / pageWidth) * 100));
-          const numY = (pageHeight - maxY); // Distance from top edge
-          const pctY = Math.max(1, Math.min(95, (numY / pageHeight) * 100));
-          const pctW = Math.max(5, Math.min(98, ((maxX - minX) / pageWidth) * 100));
-          const pctH = Math.max(2, Math.min(98, ((maxY - minY) / pageHeight) * 100));
-
-          // Let's dynamically classify block type
           let blockType: ExtractedBlock["type"] = "paragraph";
-          const cleanedText = segmentText.trim();
-          const colType = currentBlockLines[0].col;
+          const cleanedText = blockText.trim();
 
-          if (cleanedText.length < 90 && colType === "full" && index < 3 && (/^[A-Z]/.test(cleanedText) || cleanedText.toLowerCase().includes("paper") || cleanedText.toLowerCase().includes("journal"))) {
+          if (cleanedText.length < 90 && g.col === "full" && pctY < 20 && (/^[A-Z]/.test(cleanedText) || cleanedText.toLowerCase().includes("paper") || cleanedText.toLowerCase().includes("journal"))) {
             blockType = "title";
           } else if (cleanedText.length < 60 && (/^[0-9]\.?\s+[A-Z]/i.test(cleanedText) || cleanedText.toLowerCase().includes("abstract") || cleanedText.toLowerCase().includes("introduction") || cleanedText.toLowerCase().includes("methodology") || cleanedText.toLowerCase().includes("conclusion") || cleanedText.toLowerCase().includes("reference"))) {
             blockType = "header";
@@ -363,7 +390,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           }
 
           blocks.push({
-            id: `p-${pageNum}-b-${blocks.length}`,
+            id: `p-${pageNum}-b-${idx}`,
             type: blockType,
             originalText: cleanedText,
             x: Math.round(pctX),
@@ -371,34 +398,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             w: Math.round(pctW),
             h: Math.round(pctH),
           });
-
-          currentBlockLines = [];
-        };
-
-        classifiedLines.forEach((line, lIdx) => {
-          if (currentBlockLines.length === 0) {
-            currentBlockLines.push(line);
-            return;
-          }
-
-          const lastLine = currentBlockLines[0]; // Anchor column
-          const prevLine = currentBlockLines[currentBlockLines.length - 1];
-          const verticalGap = Math.abs(prevLine.y - line.y); // Vertical coordinates are descending
-
-          // Group lines if vertical gap is reasonable, and they share the same column mode
-          const isCloseVertically = verticalGap < (line.height * 2.8);
-          const isSameCol = lastLine.col === line.col;
-
-          if (isCloseVertically && isSameCol) {
-            currentBlockLines.push(line);
-          } else {
-            flushBlock(lIdx);
-            currentBlockLines.push(line);
-          }
         });
-
-        // Flush final block
-        flushBlock(classifiedLines.length - 1);
 
         extractedPages.push({
           pageNumber: pageNum,

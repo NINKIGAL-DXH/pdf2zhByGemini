@@ -267,59 +267,75 @@ ${JSON.stringify(batch)}
   const targetModel = model || (provider === "lmstudio" ? "qwen2.5-7b-instruct" : provider === "omlx" ? "llama3.2" : "gpt-4o-mini");
   const url = targetEndpoint.endsWith("/chat/completions") ? targetEndpoint : `${targetEndpoint}/chat/completions`;
 
-  const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
-Input List: ${JSON.stringify(textBlocks)}`;
+  const batchSize = 15; // Extremely safe batch size for local models to keep performance high and prevent context truncation
+  const translatedBlocks: string[] = [];
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000); // Increased to 90 seconds to prevent local model timeouts on slow hardware
+    console.log(`Starting Custom API translation of ${textBlocks.length} blocks in batches of ${batchSize}...`);
 
-    console.log(`Sending real API translation target: [${targetModel}] at [${url}]`);
-    
-    // Construct request body compatibly
-    const requestBody: any = {
-      model: targetModel,
-      messages: [
-        { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
-        { role: "user", content: prompt }
-      ]
-    };
+    for (let i = 0; i < textBlocks.length; i += batchSize) {
+      const batch = textBlocks.slice(i, i + batchSize);
+      const prompt = `Translate each segment of the following list from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}". Retain original technical formatting, mathematical variables, and spacing where necessary. Return a raw JSON array of strings in the exact same sequence. No markdown wrapping.
+Input List: ${JSON.stringify(batch)}`;
 
-    // Only apply response_format: JSON if provider is openai to avoid compatibility issues with local/older Ollama & LM Studio platforms
-    if (provider === "openai") {
-      requestBody.response_format = { type: "json_object" };
-    }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s per batch is extremely comfortable
 
-    const apiResponse = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
+      console.log(`Sending real API translation target batch starting at index ${i}: [${targetModel}] at [${url}]`);
+      
+      const requestBody: any = {
+        model: targetModel,
+        messages: [
+          { role: "system", content: "You are a layout-preserving translation engine. Translate accurately and output a raw JSON array of translated strings in identical array dimension length." },
+          { role: "user", content: prompt }
+        ]
+      };
 
-    clearTimeout(timeoutId);
+      if (provider === "openai") {
+        requestBody.response_format = { type: "json_object" };
+      }
 
-    if (apiResponse.ok) {
-      const data = await apiResponse.json();
-      const contentText = data.choices?.[0]?.message?.content || "[]";
-      const list = parseTranslationResponse(contentText, textBlocks.length);
-      if (list && list.length > 0) {
-        return res.json({
-          success: true,
-          translatedBlocks: list,
-          message: `Translated via custom model: "${targetModel}"`
-        });
+      const apiResponse = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (apiResponse.ok) {
+        const data = await apiResponse.json();
+        const contentText = data.choices?.[0]?.message?.content || "[]";
+        const list = parseTranslationResponse(contentText, batch.length);
+        if (list && list.length > 0) {
+          translatedBlocks.push(...list);
+        } else {
+          console.warn(`JSON alignment list parse failed for batch starting at ${i}, returning original texts for fallback.`);
+          translatedBlocks.push(...batch);
+        }
+      } else {
+        let responseErrText = "";
+        try {
+          responseErrText = await apiResponse.text();
+        } catch (_) {}
+        throw new Error(`Model host returned statusCode ${apiResponse.status}: ${responseErrText || "No response body"}`);
       }
     }
-    
-    let responseErrText = "";
-    try {
-      responseErrText = await apiResponse.text();
-    } catch (_) {}
-    throw new Error(`Model host returned statusCode ${apiResponse.status}: ${responseErrText || "No response body"}`);
+
+    if (translatedBlocks.length > 0) {
+      return res.json({
+        success: true,
+        translatedBlocks,
+        message: `Translated via custom model: "${targetModel}"`
+      });
+    } else {
+      throw new Error("No translation returned from Custom model.");
+    }
+
   } catch (err: any) {
     console.warn(`Connection failed to custom endpoint "${url}" (${err.message || err}). Bootstrapping cloud sandbox Gemini translation fallback...`);
     
