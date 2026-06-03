@@ -205,25 +205,24 @@ export default function ReaderView({
   };
 
   const getBlockStyles = (type: PDFLayoutBlock["type"], isHovered: boolean, isTranslated: boolean) => {
-    const base = "absolute select-none transition-all duration-350 rounded";
+    // We add container queries and flex properties to keep text nicely arranged and avoid layout mix-ups (文本混叠)
+    const base = "absolute select-none transition-all duration-350 rounded flex flex-col justify-start overflow-hidden";
     
     let typeConfig = "";
     if (isTranslated) {
       if (outlineMode) {
-        typeConfig = "border border-sky-200 bg-white/95 text-slate-800";
+        typeConfig = "border border-sky-200 bg-white/95 text-slate-800 shadow-[inset_0_0_8px_rgba(255,255,255,1)]";
         if (type === "title") typeConfig = "border border-amber-300 bg-white/95 font-bold text-center text-slate-900";
         else if (type === "abstract") typeConfig = "border border-emerald-250 bg-white/95 italic text-slate-800";
         else if (type === "header") typeConfig = "border border-indigo-300 bg-white/95 font-semibold text-slate-800";
         else if (type === "equation") typeConfig = "border border-purple-300 bg-white/95 text-center font-mono text-purple-700";
         else if (type === "figure") typeConfig = "border border-rose-350 bg-white/40 text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
-        else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400";
+        else if (type === "footer") typeConfig = "border border-gray-250 bg-white/95 text-[10px] text-gray-400 font-serif";
       } else {
         // Clean Paper view (Translated)
         if (type === "figure") {
-          // Figures should be transparent so background image graphics shine through
           typeConfig = "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "equation") {
-          // If pure clean view, we must render the equation text itself since background figures are off
           typeConfig = viewMode === "clean" ? "bg-white font-mono text-center text-purple-700 select-text" : "bg-transparent text-transparent border-none pointer-events-none";
         } else if (type === "title") {
           typeConfig = "bg-white font-bold text-center text-slate-900";
@@ -232,9 +231,9 @@ export default function ReaderView({
         } else if (type === "abstract") {
           typeConfig = "bg-white italic text-slate-700";
         } else if (type === "footer") {
-          typeConfig = "bg-white text-[10px] text-gray-400";
+          typeConfig = "bg-white text-[10px] text-gray-400 font-serif";
         } else {
-          typeConfig = "bg-white text-slate-800"; // default paragraph white mask cover
+          typeConfig = "bg-white text-slate-800 leading-snug"; 
         }
       }
     } else {
@@ -248,8 +247,6 @@ export default function ReaderView({
         else if (type === "figure") typeConfig = "border border-rose-250 bg-rose-500/[0.03] text-rose-600 text-center text-xs flex items-center justify-center border-dashed";
         else if (type === "footer") typeConfig = "border border-gray-200 bg-gray-500/[0.03] text-[10px] text-gray-400";
       } else {
-        // Clean original page view - completely transparent to show native crisp PDF!
-        // This is gorgeous and keeps elements fully aligned & copyable
         typeConfig = "bg-transparent text-transparent hover:bg-white/[0.02]";
       }
     }
@@ -261,16 +258,26 @@ export default function ReaderView({
     return `${base} ${typeConfig} ${hoverConfig}`;
   };
 
-  const getAdaptiveFontSize = (type: PDFLayoutBlock["type"], text: string) => {
-    let baseSize = 9.5;
-    if (type === "title") return "14px";
-    if (type === "header") return "11px";
-    if (type === "footer") return "8px";
+  const getAdaptiveFontSize = (type: PDFLayoutBlock["type"], text: string, blockWidthPct: number, blockHeightPct: number) => {
+    // Emulate PDFMathTranslate font logic: if translated text is very long, aggressively shrink size to prevent overlap
+    let baseSize = 8.5;
+    
+    if (type === "title") return "clamp(12px, 1.8vw, 18px)";
+    if (type === "header") return "clamp(9px, 1.3vw, 13px)";
+    if (type === "footer") return "clamp(6px, 0.8vw, 9px)";
     
     const len = text ? text.length : 0;
-    if (len > 350) baseSize = 8;
-    else if (len > 200) baseSize = 8.5;
-    else baseSize = 10;
+    // Calculate density: characters per percentage box area
+    const area = blockWidthPct * blockHeightPct;
+    const density = len / (area || 1);
+    
+    // More precise down-scaling based on character density (prevent 文本混叠)
+    if (density > 15) baseSize = 6;
+    else if (density > 10) baseSize = 6.5;
+    else if (density > 6.5) baseSize = 7.5;
+    else if (density > 4.5) baseSize = 8.2;
+    else if (density > 2.5) baseSize = 9;
+    else baseSize = 9.8;
 
     return `${baseSize}px`;
   };
@@ -551,14 +558,14 @@ export default function ReaderView({
                     top: `${block.y}%`,
                     width: `${block.w}%`,
                     height: `${block.h}%`,
-                    fontSize: getAdaptiveFontSize(block.type, displayText),
+                    fontSize: getAdaptiveFontSize(block.type, displayText, block.w, block.h),
                     lineHeight: "1.4",
                   }}
                   onMouseEnter={() => setHoveredBlockId(block.id)}
                   onMouseLeave={() => setHoveredBlockId(null)}
                   onClick={() => startEditing(block)}
                 >
-                  <div className="p-0.5 w-full h-full overflow-y-auto overflow-x-hidden style-scrollbar flex flex-col justify-start">
+                  <div className="p-0.5 w-full h-full overflow-hidden flex flex-col justify-start">
                     {block.type === "figure" ? (
                       outlineMode ? (
                         <VisualFigureRenderer caption={block.translatedText || block.originalText} />

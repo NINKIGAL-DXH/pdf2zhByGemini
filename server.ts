@@ -243,16 +243,35 @@ ${JSON.stringify(batch)}
 
           const responseText = geminiResponse.text?.trim() || "[]";
           const parsed = parseTranslationResponse(responseText, batch.length);
-          if (parsed && Array.isArray(parsed)) {
-            // High durability: enforce exact array dimension alignment
+          if (parsed && Array.isArray(parsed) && parsed.length === batch.length) {
+            translatedBlocks.push(...parsed);
+          } else if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+            console.warn(`Gemini length mismatch (Expected ${batch.length}, got ${parsed.length}). Using partial and padding...`);
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
               aligned.push(batch[aligned.length]);
             }
             translatedBlocks.push(...aligned);
           } else {
-            console.warn("Gemini didn't return a proper JSON array, falling back to batch copy.");
-            translatedBlocks.push(...batch);
+            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
+            // Extremely aggressive anti-untranslated fallback: translate them 1-by-1 if batch JSON structure breaks
+            for (const singleEnglishText of batch) {
+               try {
+                   const singlePrompt = `Translate the following text from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Preserve all mathematical formulas and LaTeX. Output ONLY the translated string, nothing else.
+Text:
+${singleEnglishText}`;
+                   const singleResponse = await ai.models.generateContent({
+                      model: "gemini-3.1-flash",
+                      contents: singlePrompt
+                   });
+                   const singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleEnglishText;
+                   translatedBlocks.push(singleText);
+               } catch (singleErr) {
+                   console.error("Individual fallback translation failed:", singleErr);
+                   translatedBlocks.push(singleEnglishText);
+               }
+            }
           }
         } catch (batchErr: any) {
           console.error(`Cloud Gemini translation batch starting at index ${i} failed partially:`, batchErr.message || batchErr);
@@ -340,15 +359,18 @@ ${JSON.stringify(batch)}`;
             const data = await apiResponse.json();
             const contentText = data.choices?.[0]?.message?.content || "[]";
             const parsed = parseTranslationResponse(contentText, batch.length);
-            if (parsed && Array.isArray(parsed)) {
-              // High durability: enforce exact array dimension alignment
+            if (parsed && Array.isArray(parsed) && parsed.length === batch.length) {
+              const aligned = parsed.slice(0, batch.length);
+              for (let j = 0; j < aligned.length; j++) resultBlocks[startIdx + j] = aligned[j];
+            } else if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+              console.warn(`Local model length mismatch (Expected ${batch.length}, got ${parsed.length}). Using partial and padding...`);
               const aligned = parsed.slice(0, batch.length);
               while (aligned.length < batch.length) {
                 aligned.push(batch[aligned.length]);
               }
               for (let j = 0; j < aligned.length; j++) resultBlocks[startIdx + j] = aligned[j];
             } else {
-              console.warn(`JSON alignment list parse failed for batch starting at ${startIdx}, returning original texts for fallback.`);
+              console.warn(`JSON alignment list parse failed completely for batch starting at ${startIdx}, returning original texts for fallback to prevent crash.`);
               for (let j = 0; j < batch.length; j++) resultBlocks[startIdx + j] = batch[j];
             }
           } else {
@@ -433,15 +455,33 @@ ${JSON.stringify(batch)}
 
           const responseText = geminiResponse.text?.trim() || "[]";
           const parsed = parseTranslationResponse(responseText, batch.length);
-          if (parsed && Array.isArray(parsed)) {
-            // High durability: enforce exact array dimension alignment
+          if (parsed && Array.isArray(parsed) && parsed.length === batch.length) {
+            translatedBlocks.push(...parsed);
+          } else if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+            console.warn(`Gemini length mismatch (Expected ${batch.length}, got ${parsed.length}). Using partial and padding...`);
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
               aligned.push(batch[aligned.length]);
             }
             translatedBlocks.push(...aligned);
           } else {
-            translatedBlocks.push(...batch);
+            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
+            for (const singleEnglishText of batch) {
+               try {
+                   const singlePrompt = `Translate the following text from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+Preserve all mathematical formulas and LaTeX. Output ONLY the translated string, nothing else.
+Text:
+${singleEnglishText}`;
+                   const singleResponse = await ai.models.generateContent({
+                      model: "gemini-3.1-flash",
+                      contents: singlePrompt
+                   });
+                   const singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleEnglishText;
+                   translatedBlocks.push(singleText);
+               } catch (singleErr) {
+                   translatedBlocks.push(singleEnglishText);
+               }
+            }
           }
         } catch (fErr: any) {
           console.error(`Gemini fallback batch starting at index ${i} failed partially:`, fErr.message || fErr);
