@@ -258,7 +258,18 @@ export async function parsePDFFile(file: File, translateFigures: boolean = false
             // If horizontal gap is larger than 12% of the page width, split it!
             const gapThreshold = pageWidth * 0.12;
             if (gap > gapThreshold) {
-              const text = currentSegment.map((it) => it.str).join(" ").replace(/\s+/g, " ");
+              let text = "";
+              for (let i = 0; i < currentSegment.length; i++) {
+                text += currentSegment[i].str;
+                if (i < currentSegment.length - 1) {
+                   const diff = currentSegment[i + 1].x - (currentSegment[i].x + currentSegment[i].w);
+                   if (diff > currentSegment[i].h * 0.25 && !text.endsWith("$")) {
+                      text += " ";
+                   }
+                }
+              }
+              text = text.replace(/\s+/g, " ");
+              
               const minX = Math.min(...currentSegment.map((it) => it.x));
               const maxX = Math.max(...currentSegment.map((it) => it.x + it.w));
               const avgHeight = currentSegment.reduce((acc, it) => acc + it.h, 0) / currentSegment.length;
@@ -279,7 +290,20 @@ export async function parsePDFFile(file: File, translateFigures: boolean = false
           }
 
           if (currentSegment.length > 0) {
-            const text = currentSegment.map((it) => it.str).join(" ").replace(/\s+/g, " ");
+            let text = "";
+            for (let i = 0; i < currentSegment.length; i++) {
+              text += currentSegment[i].str;
+              if (i < currentSegment.length - 1) {
+                 const diff = currentSegment[i + 1].x - (currentSegment[i].x + currentSegment[i].w);
+                 // Only add a space if the gap is larger than 1/4th of the previous character's height
+                 // and it's not a math formula that has been $ wrapped.
+                 if (diff > currentSegment[i].h * 0.25 && !text.endsWith("$")) {
+                    text += " ";
+                 }
+              }
+            }
+            text = text.replace(/\s+/g, " ");
+
             const minX = Math.min(...currentSegment.map((it) => it.x));
             const maxX = Math.max(...currentSegment.map((it) => it.x + it.w));
             const avgHeight = currentSegment.reduce((acc, it) => acc + it.h, 0) / currentSegment.length;
@@ -415,6 +439,10 @@ export async function parsePDFFile(file: File, translateFigures: boolean = false
             blockType = "figure";
           } else if (pctY > 88 && cleanedText.length < 120) {
             blockType = "footer";
+          } else if (cleanedText.length < 150 && (cleanedText.match(/\d/g)?.length || 0) > cleanedText.length * 0.25) {
+            blockType = "figure"; // Numeric heavy data in tables
+          } else if (g.lines.length <= 2 && cleanedText.length < 50 && !/[.!?]$/.test(cleanedText)) {
+            blockType = "figure"; // Short tabular fragments and values
           }
 
           blocks.push({

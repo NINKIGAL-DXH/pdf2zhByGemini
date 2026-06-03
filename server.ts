@@ -221,7 +221,8 @@ Follow these rules strictly:
 1. Preserve all mathematical formulas, LaTeX, and technical variables. Wrap mathematical equations in standard Markdown LaTeX format (e.g., $E=mc^2$ or $$...$$) where applicable.
 2. Translate ALL English human-readable words and sentences to natural ${targetLang || "Chinese (Simplified)"}. If the target is Chinese, outputs must contain Chinese characters! Do NOT leave English text untranslated.
 3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
-4. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
+4. DO NOT drop punctuation marks (periods, commas, etc). Translate them correspondingly.
+5. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
 
 Input List:
 ${JSON.stringify(batch)}
@@ -345,7 +346,8 @@ Follow these rules strictly:
 1. Preserve all mathematical formulas, LaTeX, and technical variables. Wrap mathematical equations in standard Markdown LaTeX format (e.g., $E=mc^2$ or $$...$$) where applicable.
 2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
 3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
-4. Return EXACTLY a raw JSON array of strings. Do not include markdown wrappers (like \`\`\`json).
+4. DO NOT drop punctuation marks (periods, commas, etc). Translate them correspondingly.
+5. Return EXACTLY a raw JSON array of strings. Do not include markdown wrappers (like \`\`\`json).
 
 Input List: 
 ${JSON.stringify(batch)}`;
@@ -457,7 +459,8 @@ Follow these rules strictly:
 1. Preserve all mathematical formulas, LaTeX, and technical variables. Wrap mathematical equations in standard Markdown LaTeX format (e.g., $E=mc^2$ or $$...$$) where applicable.
 2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
 3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
-4. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
+4. DO NOT drop punctuation marks (periods, commas, etc). Translate them correspondingly.
+5. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
 
 Input List:
 ${JSON.stringify(batch)}

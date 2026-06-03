@@ -211,7 +211,7 @@ export default function App() {
           ctx.textBaseline = "top";
           ctx.textAlign = "left";
 
-          const tokens = cleanTextForCanvas.match(/[\u4e00-\u9fa5]|\s+|[a-zA-Z0-9_\-.,!?;:'"()\[\]{}&%]+/g) || cleanTextForCanvas.split("");
+          const tokens = cleanTextForCanvas.match(/[\u4e00-\u9fa5\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F]|\s+|[^\s\u4e00-\u9fa5\u3000-\u303F\uFF00-\uFFEF\u2000-\u206F]+/g) || cleanTextForCanvas.split("");
           
           let fontSize = initialFontSize;
           let wrappedLines: string[] = [];
@@ -1617,8 +1617,13 @@ export default function App() {
                           onClick={() => {
                             setCurrentProgressStep("idle");
                             setSelectedFile(null);
+                            setActiveTranslatingDoc(null);
+                            setTerminalLogs([]);
+                            setTranslationProgress(0);
+                            setTranslationWarning(null);
+                            setTranslationError(null);
                           }}
-                          className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+                          className="text-xs flex items-center space-x-1.5 text-slate-400 hover:text-white cursor-pointer px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded border border-white/5 transition"
                         >
                           Translate Another File
                         </button>
