@@ -116,6 +116,7 @@ export interface ExtractedPage {
   height: number;
   blocks: ExtractedBlock[];
   backgroundUrl?: string;
+  originalBackgroundUrl?: string;
 }
 
 export async function parsePDFFile(file: File): Promise<{ pageCount: number; pages: ExtractedPage[] }> {
@@ -135,31 +136,29 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1.0 });
         const { width: pageWidth, height: pageHeight } = viewport;
-
-        // Render page to canvas to generate a background image
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        const renderScale = 2.0; // High resolution for better visibility
+        
+        const renderScale = 2.0; 
         const renderViewport = page.getViewport({ scale: renderScale });
-        canvas.width = renderViewport.width;
-        canvas.height = renderViewport.height;
-
-        if (ctx) {
-          const renderContext = {
-            canvasContext: ctx,
-            viewport: renderViewport,
-          };
-          // @ts-ignore
-          await page.render(renderContext).promise;
-        }
-
-        let backgroundUrl = "";
 
         const textContent = await page.getTextContent();
         const items = textContent.items as any[];
 
         if (items.length === 0) {
-          backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
+          // Render page to canvas for scanned document
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+          canvas.width = renderViewport.width;
+          canvas.height = renderViewport.height;
+
+          if (ctx) {
+            const renderContext = {
+              canvasContext: ctx,
+              viewport: renderViewport,
+            };
+            // @ts-ignore
+            await page.render(renderContext).promise;
+          }
+          const backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
           // Fallback for scanned/empty pages - dynamic and customized for the specific file name!
           extractedPages.push({
             pageNumber: pageNum,
@@ -340,10 +339,18 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             const sameCol = g.col === line.col;
             const verticalGap = line.top - g.bottom;
             const horizOverlap = Math.max(0, Math.min(g.right, line.right) - Math.max(g.left, line.left));
+            
+            // Check if there is an indentation from the last line (signals new paragraph)
+            const lastLine = g.lines[g.lines.length - 1];
+            const isIndented = Math.abs(line.left - lastLine.left) > (line.height * 1.5) && line.left > lastLine.left + 5;
+            
+            // A tight gap means it's continuous text.
+            const maxGap = isIndented ? line.height * 0.8 : line.height * 1.6;
+            
             const hasHorizProximity = horizOverlap > 0 || Math.abs(g.left - line.left) < 50 || Math.abs(g.right - line.right) < 50;
 
             const gHeight = g.bottom - g.top;
-            if (sameCol && verticalGap > -gHeight && verticalGap < line.height * 2.8 && hasHorizProximity) {
+            if (sameCol && verticalGap > -gHeight && verticalGap <= maxGap && hasHorizProximity) {
               g.lines.push(line);
               g.left = Math.min(g.left, line.left);
               g.right = Math.max(g.right, line.right);
@@ -406,29 +413,73 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
           });
         });
 
-        // Now that we have blocks, we erase text from the canvas to produce a clean background!
+        // 1. Render the FULL ORIGINAL page
+        const origCanvas = document.createElement("canvas");
+        const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+        origCanvas.width = renderViewport.width;
+        origCanvas.height = renderViewport.height;
+        if (origCtx) {
+          const renderContextOrig = { canvasContext: origCtx, viewport: renderViewport };
+          // @ts-ignore
+          await page.render(renderContextOrig).promise;
+        }
+        let originalBackgroundUrl = origCanvas.toDataURL("image/jpeg", 1.0);
+
+        // 2. Render the MASKED page (for translated text)
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+
         if (ctx) {
-          ctx.fillStyle = "#ffffff";
-          blocks.forEach(block => {
-            if (block.type !== "figure" && block.type !== "equation") {
-              const bx = (block.x / 100) * canvas.width;
-              const by = (block.y / 100) * canvas.height;
-              const bw = (block.w / 100) * canvas.width;
-              const bh = (block.h / 100) * canvas.height;
-              
-              // We expand the box slightly to catch anti-aliasing edges of the text
-              ctx.fillRect(bx - 1.5, by - 1.5, bw + 3, bh + 3);
+          const origFillText = ctx.fillText;
+          ctx.fillText = function (text: string, x: number, y: number, maxWidth?: number) {
+            // Check current transform
+            const pt = ctx.getTransform().transformPoint(new DOMPoint(x, y));
+            const canvasX = pt.x;
+            const canvasY = pt.y;
+            
+            // Check if this point falls inside any text block that is going to be replaced
+            let shouldMask = false;
+            for (const b of blocks) {
+               if (b.type === "paragraph" || b.type === "title" || b.type === "header" || b.type === "abstract" || b.type === "footer") {
+                  const bLeft = (b.x / 100) * canvas.width;
+                  const bTop = (b.y / 100) * canvas.height;
+                  const bRight = ((b.x + b.w) / 100) * canvas.width;
+                  const bBottom = ((b.y + b.h) / 100) * canvas.height;
+                  
+                  // Expand margin slightly for line height variances and baseline mismatches
+                  if (canvasX >= bLeft - 5 && canvasX <= bRight + 5 && canvasY >= bTop - 15 && canvasY <= bBottom + 10) {
+                      shouldMask = true;
+                      break;
+                  }
+               }
             }
-          });
+
+            if (!shouldMask) {
+               origFillText.call(ctx, text, x, y, maxWidth);
+            }
+          };
+
+          const renderContext = {
+            canvasContext: ctx,
+            viewport: renderViewport,
+          };
+          // @ts-ignore
+          await page.render(renderContext).promise;
+          
+          // restore
+          ctx.fillText = origFillText;
         }
         
-        backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
+        let backgroundUrl = canvas.toDataURL("image/jpeg", 1.0);
 
         extractedPages.push({
           pageNumber: pageNum,
           width: pageWidth,
           height: pageHeight,
           backgroundUrl,
+          originalBackgroundUrl,
           blocks,
         });
       } catch (pageErr) {

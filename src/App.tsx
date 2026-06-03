@@ -186,10 +186,6 @@ export default function App() {
           const bw = (block.w / 100) * pageWidth;
           const bh = (block.h / 100) * pageHeight;
 
-          // Blank out the original text area so it doesn't bleed through
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-
           const text = block.translatedText || block.originalText;
           // Strip out the markdown equations wrapping so it looks clean in canvas PDF
           const cleanTextForCanvas = text.replace(/\$\$(.*?)\$\$/g, '$1').replace(/\$(.*?)\$/g, '$1');
@@ -801,6 +797,30 @@ export default function App() {
     e.stopPropagation();
     const updated = history.filter(d => d.id !== id);
     saveHistoryToLocalStorage(updated);
+  };
+
+  const clearConfigData = () => {
+    if (window.confirm("警告：确认清除所有的服务商配置（API Keys、服务请求端点等模型设置）？这会将配置重置为默认，这无法撤销。\n注意：此操作仅删除本应用 (pdf2zh) 的相关数据。\n(Warning: Are you sure you want to clear all custom AI provider configurations and API keys? This only affects this app.)")) {
+      localStorage.removeItem("pdf2zh_providers_config");
+      localStorage.removeItem("pdf2zh_selected_provider_idx");
+      const defaultProviders: AIProviderConfig[] = [
+        { provider: "gemini", apiKey: "Injected Cloud Key", endpoint: "Cloud run", model: "gemini-3.1-flash", isActive: true },
+        { provider: "openai", apiKey: "", endpoint: "https://api.openai.com/v1", model: "gpt-4o-mini", isActive: false },
+        { provider: "lmstudio", apiKey: "lm-studio", endpoint: "http://localhost:1234/v1", model: "qwen2.5-7b-instruct", isActive: false },
+        { provider: "omlx", apiKey: "ollama", endpoint: "http://localhost:11434", model: "llama3.2", isActive: false }
+      ];
+      setProviders(defaultProviders);
+      setSelectedProviderIdx(0);
+      alert("配置参数残留已成功清除。(Config data cleared.)");
+    }
+  };
+
+  const clearHistoryData = () => {
+    if (window.confirm("警告：确认清除所有的历史翻译架构缓存（包含 PDF 历史背景渲染图及所有翻译对照缓存参数）吗？清除后无法找回。\n注意：此操作仅删除本应用 (pdf2zh) 的相关数据。\n(Warning: Are you sure you want to clear all translated history archives and background image caches? This only affects this app.)")) {
+      localStorage.removeItem("pdf2zh_translation_history");
+      setHistory([]);
+      alert("历史档案与背景缓存清理完成。(History and background data cleared.)");
+    }
   };
 
   // Callback to update custom block translating in ReaderView
@@ -1741,6 +1761,31 @@ export default function App() {
                   className="space-y-6 w-full"
                   id="tab-history"
                 >
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h2 className="text-xl font-bold font-display text-white">Archives & Reader (档案与阅读器)</h2>
+                      <p className="text-[10px] text-slate-400 mt-1 uppercase font-mono">Select a document to review bilingual translations, or clear residuals.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={clearHistoryData}
+                        className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded text-xs font-semibold transition border border-rose-600/30 shadow-lg shadow-rose-900/10 flex items-center space-x-1.5 cursor-pointer"
+                        title="Clear local history storage residuals"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>清理存档与背景图缓存</span>
+                      </button>
+                      <button
+                        onClick={clearConfigData}
+                        className="px-3 py-1.5 bg-orange-600/20 hover:bg-orange-600 text-orange-400 hover:text-white rounded text-xs font-semibold transition border border-orange-600/30 shadow-lg shadow-orange-900/10 flex items-center space-x-1.5 cursor-pointer"
+                        title="Clear API keys and endpoints from local storage"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                        <span>清理请求端点与密钥</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {history.length === 0 ? (
                     <div className="bg-white/5 rounded-xl border border-white/5 p-12 text-center flex flex-col items-center justify-center space-y-4" id="empty-history">
                       <div className="p-4 bg-white/5 text-slate-300 rounded-full border border-white/10">

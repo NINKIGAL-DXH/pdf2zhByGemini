@@ -272,9 +272,6 @@ export default function ReaderView({
     else if (len > 200) baseSize = 8.5;
     else baseSize = 10;
 
-    if (viewMode === "bilingual") {
-      return `${baseSize * 0.9}px`;
-    }
     return `${baseSize}px`;
   };
 
@@ -449,8 +446,9 @@ export default function ReaderView({
       </div>
 
       {/* Main split screens viewport */}
-      <div className="flex-1 flex overflow-hidden p-6 gap-6" id="reader-split-area">
+      <div className={`flex-1 flex overflow-hidden p-6 gap-6 ${viewMode === "bilingual" ? "justify-center" : "justify-center max-w-5xl mx-auto w-full"}`} id="reader-split-area">
         {/* Left Side: Original Layout Document Sheet */}
+        {viewMode === "bilingual" && (
         <div className="flex-1 flex flex-col items-center overflow-auto bg-white/[0.02] backdrop-blur-md rounded-xl border border-white/5 p-4 style-scrollbar" id="original-sheet-container">
           <div className="mb-3 text-[10px] font-semibold font-mono text-slate-400 tracking-wider uppercase border-b border-white/5 pb-2.5 w-full text-center">
             Original Layout ({sourceLang.toUpperCase()})
@@ -470,10 +468,10 @@ export default function ReaderView({
             id="pdf-original-canvas"
           >
             {/* Background PDF page rendering */}
-            {currentPage.backgroundUrl && (
+            {(currentPage.originalBackgroundUrl || currentPage.backgroundUrl) && (
               <img 
-                src={currentPage.backgroundUrl} 
-                alt="PDF background" 
+                src={currentPage.originalBackgroundUrl || currentPage.backgroundUrl} 
+                alt="PDF original background" 
                 className={`absolute inset-0 w-full h-full pointer-events-none transition-opacity duration-300 ${outlineMode ? 'opacity-35' : 'opacity-100'}`} 
               />
             )}
@@ -484,49 +482,23 @@ export default function ReaderView({
                 <div key={i} className="border border-slate-300"></div>
               ))}
             </div>
-
-            {/* Layout blocks */}
-            {currentPage.blocks.map((block) => {
-              const isHovered = hoveredBlockId === block.id;
-              return (
-                <div
+            
+            {/* Outline Mode Highlighters (Only draw block boundaries, no text) */}
+            {outlineMode && currentPage.blocks.map((block) => (
+               <div
                   key={block.id}
-                  className={getBlockStyles(block.type, isHovered, false)}
+                  className="absolute border border-blue-400 bg-blue-500/10 pointer-events-none"
                   style={{
                     left: `${block.x}%`,
                     top: `${block.y}%`,
                     width: `${block.w}%`,
-                    height: `${block.h}%`,
-                    fontSize: getAdaptiveFontSize(block.type, block.originalText),
-                    lineHeight: "1.3"
+                    height: `${block.h}%`
                   }}
-                  onMouseEnter={() => setHoveredBlockId(block.id)}
-                  onMouseLeave={() => setHoveredBlockId(null)}
-                  onClick={() => startEditing(block)}
-                >
-                  <div className="p-0.5 w-full h-full overflow-y-auto overflow-x-hidden style-scrollbar flex flex-col justify-start">
-                    {block.type === "figure" ? (
-                      outlineMode ? (
-                        <VisualFigureRenderer caption={block.originalText} />
-                      ) : null
-                    ) : (
-                      <span className="align-top block leading-[1.65] break-words whitespace-pre-wrap select-text font-serif text-justify pdf-content-markdown">
-                        <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.originalText}</Markdown>
-                      </span>
-                    )}
-
-                    {/* Small edit helper on hover */}
-                    {isHovered && block.type !== "figure" && (
-                      <div className="absolute top-1 right-1 p-0.5 bg-blue-600 text-white rounded opacity-90 shadow">
-                        <Edit2 className="w-2.5 h-2.5" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+               />
+            ))}
           </div>
         </div>
+        )}
 
         {/* Right Side: Translated Layout Document Sheet */}
         <div className="flex-1 flex flex-col items-center overflow-auto bg-white/[0.02] backdrop-blur-md rounded-xl border border-white/5 p-4 style-scrollbar" id="translated-sheet-container">
@@ -593,11 +565,6 @@ export default function ReaderView({
                       ) : null
                     ) : (
                       <div className="text-left w-full h-full">
-                        {viewMode === "bilingual" && (
-                          <div className="text-[0.72em] leading-snug text-slate-400 italic mb-1 font-serif border-b border-dashed border-slate-200/65 pb-1 break-words select-text">
-                            <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.originalText}</Markdown>
-                          </div>
-                        )}
                         <span className="align-top block leading-[1.65] break-words whitespace-pre-wrap text-slate-900 font-serif tracking-normal font-normal select-text text-justify pdf-content-markdown">
                           {block.translatedText ? (
                             <Markdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{block.translatedText}</Markdown>
