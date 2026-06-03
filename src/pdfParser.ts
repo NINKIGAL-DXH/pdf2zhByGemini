@@ -119,7 +119,7 @@ export interface ExtractedPage {
   originalBackgroundUrl?: string;
 }
 
-export async function parsePDFFile(file: File): Promise<{ pageCount: number; pages: ExtractedPage[] }> {
+export async function parsePDFFile(file: File, translateFigures: boolean = false): Promise<{ pageCount: number; pages: ExtractedPage[] }> {
   try {
     await initWorker();
     const arrayBuffer = await file.arrayBuffer();
@@ -239,6 +239,21 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             
             // Gap between previous item's right edge and current item's left edge
             const gap = currItem.x - (prevItem.x + prevItem.w);
+
+            // Detect if this is an inline math formula based on fontName or special characters!
+            // PDFMathTranslate regex: /CM[^R]|MS.M|XY|MT|BL|RM|EU|LA|RS|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math/
+            const fontName = currItem.fontName || "";
+            const isMathFont = /(CM[^R]|MS\.M|XY|MT|BL|RM|EU|LA|RS|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|Math|Sym|Ital)/i.test(fontName);
+            const isMathChar = /^[\u0370-\u03FF\u2190-\u21FF\u2200-\u22FF<>=\+\-\*\/]+$/.test(currItem.str.trim());
+            
+            if (isMathFont || isMathChar) {
+               // Recreate $ math variables inline if it's math!
+               // Wait, PDFMathTranslate replaces this with a placeholder or keeps it intact. 
+               // For Gemini prompt, we can wrap it in $ to tell the LLM it's math and shouldn't be translated.
+               if (!currItem.str.includes('$')) {
+                  currItem.str = `$${currItem.str}$`;
+               }
+            }
 
             // If horizontal gap is larger than 12% of the page width, split it!
             const gapThreshold = pageWidth * 0.12;
@@ -442,7 +457,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             // Check if this point falls inside any text block that is going to be replaced
             let shouldMask = false;
             for (const b of blocks) {
-               if (b.type !== "equation") {
+               if (b.type !== "equation" && (b.type !== "figure" || translateFigures)) {
                   const bLeft = (b.x / 100) * canvas.width;
                   const bTop = (b.y / 100) * canvas.height;
                   const bRight = ((b.x + b.w) / 100) * canvas.width;

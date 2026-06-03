@@ -219,7 +219,7 @@ app.post("/api/translate", async (req, res) => {
           const prompt = `Translate the following JSON array of text segments from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
 Follow these rules strictly:
 1. Preserve all mathematical formulas, LaTeX, and technical variables. Wrap mathematical equations in standard Markdown LaTeX format (e.g., $E=mc^2$ or $$...$$) where applicable.
-2. Translate all English words and sentences to natural ${targetLang || "Chinese (Simplified)"}, even if they are partial sentence fragments or figures. Do NOT leave English text untranslated.
+2. Translate ALL English human-readable words and sentences to natural ${targetLang || "Chinese (Simplified)"}. If the target is Chinese, outputs must contain Chinese characters! Do NOT leave English text untranslated.
 3. Keep the output array in the exact same index order and length. The output MUST have exactly ${batch.length} elements.
 4. Return EXACTLY a JSON array of strings. Do not include markdown codeblocks or any additional packaging text outside the JSON structure.
 
@@ -242,37 +242,61 @@ ${JSON.stringify(batch)}
           });
 
           const responseText = geminiResponse.text?.trim() || "[]";
-          const parsed = parseTranslationResponse(responseText, batch.length);
-          if (parsed && Array.isArray(parsed) && parsed.length === batch.length) {
-            translatedBlocks.push(...parsed);
-          } else if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+          let parsed = parseTranslationResponse(responseText, batch.length);
+          let finalBatch: string[] = [];
+          
+          if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
+            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
+            parsed = batch; // Use original batch as fallback array to be caught by the loop below
+          } else if (parsed.length !== batch.length) {
             console.warn(`Gemini length mismatch (Expected ${batch.length}, got ${parsed.length}). Using partial and padding...`);
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
               aligned.push(batch[aligned.length]);
             }
-            translatedBlocks.push(...aligned);
-          } else {
-            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
-            // Extremely aggressive anti-untranslated fallback: translate them 1-by-1 if batch JSON structure breaks
-            for (const singleEnglishText of batch) {
-               try {
-                   const singlePrompt = `Translate the following text from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Preserve all mathematical formulas and LaTeX. Output ONLY the translated string, nothing else.
-Text:
-${singleEnglishText}`;
-                   const singleResponse = await ai.models.generateContent({
-                      model: "gemini-3.1-flash",
-                      contents: singlePrompt
-                   });
-                   const singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleEnglishText;
-                   translatedBlocks.push(singleText);
-               } catch (singleErr) {
-                   console.error("Individual fallback translation failed:", singleErr);
-                   translatedBlocks.push(singleEnglishText);
-               }
-            }
+            parsed = aligned;
           }
+
+          // Single-item validation loop to catch un-translated fragments or missing languages
+          for (let k = 0; k < batch.length; k++) {
+              let singleEnglishText = batch[k];
+              let singleText = parsed[k];
+              
+              const isTargetChinese = (targetLang || "").toLowerCase().includes("chinese") || (targetLang || "").toLowerCase().includes("zh");
+              const isUntranslated = isTargetChinese && /[a-zA-Z]{3,}/.test(singleEnglishText) && !/[\u4e00-\u9fa5]/.test(singleText);
+              
+              if (isUntranslated || singleText.trim() === "[]" || singleText.trim() === "") {
+                 try {
+                     const singlePrompt = `Translate the following text strictly from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+CRITICAL RULES:
+1. You MUST translate all human-readable words into ${targetLang || "Chinese (Simplified)"}. 
+2. If you leave the text purely in English when the target is Chinese, this is a FATAL ERROR.
+3. Preserve all mathematical formulas and LaTeX perfectly (do not translate variable names or math).
+4. Output ONLY the translated string, nothing else.
+
+Text to translate:
+${singleEnglishText}`;
+                     
+                     let singleResponse = await ai.models.generateContent({
+                        model: "gemini-3.1-flash",
+                        contents: singlePrompt
+                     });
+                     singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleText;
+                     
+                     if (isTargetChinese && /[a-zA-Z]{3,}/.test(singleEnglishText) && !/[\u4e00-\u9fa5]/.test(singleText)) {
+                          const retryResponse = await ai.models.generateContent({
+                            model: "gemini-3.1-flash",
+                            contents: `You failed to translate this to Chinese! Please forcefully translate this paragraph to Chinese while keeping formulas intact:\n\n${singleEnglishText}`
+                          });
+                          singleText = retryResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleText;
+                     }
+                 } catch (retryErr) {
+                     console.error("Individual fallback translation failed:", retryErr);
+                 }
+              }
+              finalBatch.push(singleText);
+          }
+          translatedBlocks.push(...finalBatch);
         } catch (batchErr: any) {
           console.error(`Cloud Gemini translation batch starting at index ${i} failed partially:`, batchErr.message || batchErr);
           // Gracefully isolate batch translation error to prevent entire process halt on long PDFs
@@ -454,35 +478,59 @@ ${JSON.stringify(batch)}
           });
 
           const responseText = geminiResponse.text?.trim() || "[]";
-          const parsed = parseTranslationResponse(responseText, batch.length);
-          if (parsed && Array.isArray(parsed) && parsed.length === batch.length) {
-            translatedBlocks.push(...parsed);
-          } else if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+          let parsed = parseTranslationResponse(responseText, batch.length);
+          let finalBatch: string[] = [];
+          
+          if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
+            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
+            parsed = batch; // fallback to original texts so loop will catch and individual-translate
+          } else if (parsed.length !== batch.length) {
             console.warn(`Gemini length mismatch (Expected ${batch.length}, got ${parsed.length}). Using partial and padding...`);
             const aligned = parsed.slice(0, batch.length);
             while (aligned.length < batch.length) {
               aligned.push(batch[aligned.length]);
             }
-            translatedBlocks.push(...aligned);
-          } else {
-            console.warn(`Gemini returned invalid or empty JSON array. Retrying translation individually for the batch of ${batch.length} items to prevent untranslated sentences.`);
-            for (const singleEnglishText of batch) {
-               try {
-                   const singlePrompt = `Translate the following text from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
-Preserve all mathematical formulas and LaTeX. Output ONLY the translated string, nothing else.
-Text:
-${singleEnglishText}`;
-                   const singleResponse = await ai.models.generateContent({
-                      model: "gemini-3.1-flash",
-                      contents: singlePrompt
-                   });
-                   const singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleEnglishText;
-                   translatedBlocks.push(singleText);
-               } catch (singleErr) {
-                   translatedBlocks.push(singleEnglishText);
-               }
-            }
+            parsed = aligned;
           }
+
+          for (let k = 0; k < batch.length; k++) {
+              let singleEnglishText = batch[k];
+              let singleText = parsed[k];
+              
+              const isTargetChinese = (targetLang || "").toLowerCase().includes("chinese") || (targetLang || "").toLowerCase().includes("zh");
+              const isUntranslated = isTargetChinese && /[a-zA-Z]{3,}/.test(singleEnglishText) && !/[\u4e00-\u9fa5]/.test(singleText);
+              
+              if (isUntranslated || singleText.trim() === "[]" || singleText.trim() === "") {
+                 try {
+                     const singlePrompt = `Translate the following text strictly from "${sourceLang || "English"}" to "${targetLang || "Chinese (Simplified)"}".
+CRITICAL RULES:
+1. You MUST translate all human-readable words into ${targetLang || "Chinese (Simplified)"}. 
+2. If you leave the text purely in English when the target is Chinese, this is a FATAL ERROR.
+3. Preserve all mathematical formulas and LaTeX perfectly (do not translate variable names or math).
+4. Output ONLY the translated string, nothing else.
+
+Text to translate:
+${singleEnglishText}`;
+                     let singleResponse = await ai.models.generateContent({
+                        model: "gemini-3.1-flash",
+                        contents: singlePrompt
+                     });
+                     singleText = singleResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleText;
+                     
+                     if (isTargetChinese && /[a-zA-Z]{3,}/.test(singleEnglishText) && !/[\u4e00-\u9fa5]/.test(singleText)) {
+                          const retryResponse = await ai.models.generateContent({
+                            model: "gemini-3.1-flash",
+                            contents: `You failed to translate this to Chinese! Please forcefully translate this paragraph to Chinese while keeping formulas intact:\n\n${singleEnglishText}`
+                          });
+                          singleText = retryResponse.text?.trim().replace(/^['"]|['"]$/g, '') || singleText;
+                     }
+                 } catch (retryErr) {
+                     console.error("Individual fallback translation failed:", retryErr);
+                 }
+              }
+              finalBatch.push(singleText);
+          }
+          translatedBlocks.push(...finalBatch);
         } catch (fErr: any) {
           console.error(`Gemini fallback batch starting at index ${i} failed partially:`, fErr.message || fErr);
           translatedBlocks.push(...batch);

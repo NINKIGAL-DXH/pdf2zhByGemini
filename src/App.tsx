@@ -77,6 +77,7 @@ export default function App() {
     pageRange: "all",
     threads: 8,
     preserveImages: true,
+    translateFigures: false,
     fontSizeRatio: 1.0,
     layoutEngine: "fitz"
   });
@@ -176,8 +177,8 @@ export default function App() {
 
         // 2. Draw & overlay each text block contextually
         page.blocks.forEach((block) => {
-          if (block.type === "figure" || block.type === "equation") {
-            // Figures and equations remain untouched to preserve native PDF rasterization underneath
+          if (block.type === "equation" || (block.type === "figure" && !doc.params?.translateFigures)) {
+            // Equations (and figures if unselected) remain untouched to preserve native PDF rasterization underneath
             return;
           }
 
@@ -191,58 +192,85 @@ export default function App() {
           const cleanTextForCanvas = text.replace(/\$\$(.*?)\$\$/g, '$1').replace(/\$(.*?)\$/g, '$1');
           
           let isBold = block.type === "title" || block.type === "header";
-          let fontSize = 10;
-          if (block.type === "title") fontSize = 16;
-          else if (block.type === "header") fontSize = 11;
-          else if (block.type === "footer") fontSize = 8;
+          
+          // Initial base font sizes for the PDF render
+          let initialFontSize = 10;
+          if (block.type === "title") initialFontSize = 16;
+          else if (block.type === "header") initialFontSize = 11;
+          else if (block.type === "footer") initialFontSize = 7.5;
           else {
-            const len = cleanTextForCanvas ? cleanTextForCanvas.length : 0;
-            if (len > 300) fontSize = 8.5;
-            else if (len > 150) fontSize = 9;
-            else fontSize = 9.5;
+            const area = bw * bh;
+            const density = (cleanTextForCanvas.length || 1) / area;
+            if (density > 0.08) initialFontSize = 7.5;
+            else if (density > 0.05) initialFontSize = 8.5;
+            else if (density > 0.03) initialFontSize = 9.5;
+            else initialFontSize = 10.5;
           }
 
           ctx.fillStyle = "#0f172a"; // classic deep ink toner/slate color
-          ctx.font = `${isBold ? "bold" : "normal"} ${fontSize}px "SF Pro SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, sans-serif`;
           ctx.textBaseline = "top";
           ctx.textAlign = "left";
 
-          const lineHeight = fontSize * 1.35;
-          // Regex perfectly matches contiguous alphanumeric strings (English words/numbers) as a single token, 
-          // or matches any single Chinese character/punctuation as a dedicated token.
           const tokens = cleanTextForCanvas.match(/[\u4e00-\u9fa5]|\s+|[a-zA-Z0-9_\-.,!?;:'"()\[\]{}&%]+/g) || cleanTextForCanvas.split("");
           
-          let line = "";
+          let fontSize = initialFontSize;
+          let wrappedLines: string[] = [];
+          let bestLineHeight = 1.35;
           let currentY = by + 2;
 
-          for (let n = 0; n < tokens.length; n++) {
-            const testLine = line + tokens[n];
-            const metrics = ctx.measureText(testLine);
-            const testWidth = metrics.width;
+          // Emulate Python PDFMathTranslate doclayout shrink loop
+          let fitFound = false;
+          while (fontSize >= 4) {
+            ctx.font = `${isBold ? "bold" : "normal"} ${fontSize}px "SF Pro SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, sans-serif`;
+            wrappedLines = [];
+            let line = "";
             
-            if (testWidth > bw - 4 && n > 0) {
-              if (currentY + lineHeight > by + bh + 4) {
-                break;
+            for (let n = 0; n < tokens.length; n++) {
+              const testLine = line + tokens[n];
+              const testWidth = ctx.measureText(testLine).width;
+              
+              if (testWidth > bw - 2 && n > 0) {
+                wrappedLines.push(line.trim());
+                line = tokens[n].trimStart();
+              } else {
+                line = testLine;
               }
-              ctx.fillText(line.trim(), bx + 2, currentY);
-              line = tokens[n].trimStart(); // start new line with the current token
-              currentY += lineHeight;
-            } else {
-              line = testLine;
             }
+            if (line) {
+              wrappedLines.push(line.trim());
+            }
+
+            const totalHeightEstimate = wrappedLines.length * (fontSize * bestLineHeight);
+            
+            if (totalHeightEstimate <= bh + 5) { // +5 margin of safety
+              fitFound = true;
+              break;
+            }
+            // Try reducing the font size
+            fontSize -= 0.25; 
           }
-          if (line && currentY <= by + bh + 4) {
-            ctx.fillText(line.trim(), bx + 2, currentY);
+
+          if (!fitFound) {
+             // Fallback if we reach minimum font boundary, we just draw what we have
+             // PDFMathTranslate will aggressively cut it down and draw
+          }
+
+          // Draw the calculated lines
+          for (const renderLine of wrappedLines) {
+            ctx.fillText(renderLine, bx + 1, currentY);
+            currentY += (fontSize * bestLineHeight);
           }
         });
 
         // Add page to PDF
         const imgData = canvas.toDataURL("image/jpeg", 0.95);
+        const orientation = pageWidth > pageHeight ? "landscape" : "portrait";
+        
         if (pIdx > 0) {
-          pdf.addPage([pageWidth, pageHeight], "portrait");
+          pdf.addPage([pageWidth, pageHeight], orientation);
         } else {
           pdf.deletePage(1);
-          pdf.addPage([pageWidth, pageHeight], "portrait");
+          pdf.addPage([pageWidth, pageHeight], orientation);
         }
         pdf.addImage(imgData, "JPEG", 0, 0, pageWidth, pageHeight);
       }
@@ -344,6 +372,7 @@ export default function App() {
           pageRange: "all",
           threads: 8,
           preserveImages: true,
+          translateFigures: false,
           fontSizeRatio: 1.0,
           layoutEngine: "fitz"
         },
@@ -423,7 +452,7 @@ export default function App() {
     });
 
     try {
-      const parsed = await parsePDFFile(file);
+      const parsed = await parsePDFFile(file, params.translateFigures);
       setSelectedFile({
         rawFile: file,
         name: file.name,
@@ -673,8 +702,12 @@ export default function App() {
     const extractList: BlockToTranslate[] = [];
     generatedPages.forEach((page, pageIdx) => {
       page.blocks.forEach(block => {
-        // PDFMathTranslate translates EVERYTHING except raw equation blocks or empty lines
+        const isFigure = block.type === "figure";
         if (block.type !== "equation" && block.originalText.trim().length > 1) {
+          if (isFigure && !params.translateFigures) {
+            // skip figure translation
+            return;
+          }
           extractList.push({
             pageIdx,
             blockId: block.id,
@@ -1327,8 +1360,8 @@ export default function App() {
                             />
                           </div>
 
-                          <div className="flex items-center space-x-6 pt-1">
-                            <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+                          <div className="flex flex-col space-y-3 pt-1">
+                            <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer w-fit">
                               <input
                                 type="checkbox"
                                 checked={params.preserveImages}
@@ -1336,6 +1369,16 @@ export default function App() {
                                 className="rounded text-blue-500 accent-blue-500"
                               />
                               <span>Preserve original diagram images / 保留图表和图片层</span>
+                            </label>
+
+                            <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer w-fit">
+                              <input
+                                type="checkbox"
+                                checked={params.translateFigures}
+                                onChange={(e) => setParams({ ...params, translateFigures: e.target.checked })}
+                                className="rounded text-blue-500 accent-blue-500"
+                              />
+                              <span>Translate text inside figures and tables / 翻译表格和图片中的文字</span>
                             </label>
                           </div>
                         </div>

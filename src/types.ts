@@ -15,6 +15,7 @@ export interface TranslationParams {
   pageRange: string; // e.g. "all", "1-3"
   threads: number;
   preserveImages: boolean;
+  translateFigures: boolean;
   fontSizeRatio: number;
   layoutEngine: "fitz" | "pdfplumber";
 }
