@@ -673,7 +673,8 @@ export default function App() {
     const extractList: BlockToTranslate[] = [];
     generatedPages.forEach((page, pageIdx) => {
       page.blocks.forEach(block => {
-        if (block.type !== "figure" && block.type !== "equation" && block.type !== "footer") {
+        // PDFMathTranslate translates EVERYTHING except raw equation blocks or empty lines
+        if (block.type !== "equation" && block.originalText.trim().length > 1) {
           extractList.push({
             pageIdx,
             blockId: block.id,

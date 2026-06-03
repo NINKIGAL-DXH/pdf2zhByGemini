@@ -442,7 +442,7 @@ export async function parsePDFFile(file: File): Promise<{ pageCount: number; pag
             // Check if this point falls inside any text block that is going to be replaced
             let shouldMask = false;
             for (const b of blocks) {
-               if (b.type === "paragraph" || b.type === "title" || b.type === "header" || b.type === "abstract" || b.type === "footer") {
+               if (b.type !== "equation") {
                   const bLeft = (b.x / 100) * canvas.width;
                   const bTop = (b.y / 100) * canvas.height;
                   const bRight = ((b.x + b.w) / 100) * canvas.width;

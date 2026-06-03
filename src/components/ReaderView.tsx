@@ -206,7 +206,7 @@ export default function ReaderView({
 
   const getBlockStyles = (type: PDFLayoutBlock["type"], isHovered: boolean, isTranslated: boolean) => {
     // We add container queries and flex properties to keep text nicely arranged and avoid layout mix-ups (文本混叠)
-    const base = "absolute select-none transition-all duration-350 rounded flex flex-col justify-start overflow-hidden";
+    const base = "absolute select-none transition-all duration-350 rounded flex flex-col justify-start overflow-hidden @container";
     
     let typeConfig = "";
     if (isTranslated) {
@@ -260,26 +260,26 @@ export default function ReaderView({
 
   const getAdaptiveFontSize = (type: PDFLayoutBlock["type"], text: string, blockWidthPct: number, blockHeightPct: number) => {
     // Emulate PDFMathTranslate font logic: if translated text is very long, aggressively shrink size to prevent overlap
-    let baseSize = 8.5;
+    // Combining static baseline with fluid CSS container queries (@container allows cqw/cqh)
     
-    if (type === "title") return "clamp(12px, 1.8vw, 18px)";
-    if (type === "header") return "clamp(9px, 1.3vw, 13px)";
-    if (type === "footer") return "clamp(6px, 0.8vw, 9px)";
+    if (type === "title") return "clamp(10px, min(14px, 18cqw), 24px)";
+    if (type === "header") return "clamp(8px, min(12px, 12cqw), 16px)";
+    if (type === "footer") return "clamp(5px, min(8px, 10cqw), 10px)";
+    if (type === "equation") return "clamp(7px, min(10px, 12cqh), 14px)";
     
     const len = text ? text.length : 0;
     // Calculate density: characters per percentage box area
     const area = blockWidthPct * blockHeightPct;
     const density = len / (area || 1);
     
-    // More precise down-scaling based on character density (prevent 文本混叠)
-    if (density > 15) baseSize = 6;
-    else if (density > 10) baseSize = 6.5;
-    else if (density > 6.5) baseSize = 7.5;
-    else if (density > 4.5) baseSize = 8.2;
-    else if (density > 2.5) baseSize = 9;
-    else baseSize = 9.8;
-
-    return `${baseSize}px`;
+    // More precise down-scaling based on character density + fluid container limits (prevent 文本混叠)
+    if (density > 15) return "clamp(5px, 9cqw, 7px)";
+    if (density > 10) return "clamp(6px, 10cqw, 8px)";
+    if (density > 6.5) return "clamp(7px, 12cqw, 9px)";
+    if (density > 4.5) return "clamp(7.5px, 14cqw, 10px)";
+    if (density > 2.5) return "clamp(8px, 16cqw, 11px)";
+    
+    return "clamp(9px, 18cqw, 12px)";
   };
 
   return (
