@@ -108,6 +108,7 @@ export default function App() {
   // Execute Mode Toggle (Sandbox vs Native pdf2zh)
   const [executeMode, setExecuteMode] = useState<"sandbox" | "native">("sandbox");
   const [isSettingUpNative, setIsSettingUpNative] = useState(false);
+  const [setupProgressNum, setSetupProgressNum] = useState<number>(0);
 
   // Terminal logging & Progress state
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
@@ -2143,6 +2144,7 @@ FLAGS EXPLAINED:
                                };
                                
                                try {
+                                 setSetupProgressNum(0);
                                  const response = await fetch("/api/pdf2zh-uninstall", { method: "POST" });
                                  if (!response.body) throw new Error("No response");
                                  const reader = response.body.getReader();
@@ -2204,6 +2206,7 @@ FLAGS EXPLAINED:
                                };
                                
                                try {
+                                 setSetupProgressNum(0);
                                  const response = await fetch("/api/pdf2zh-setup", { method: "POST" });
                                  if (!response.body) throw new Error("No response");
                                  const reader = response.body.getReader();
@@ -2224,7 +2227,9 @@ FLAGS EXPLAINED:
                                          if (line.startsWith("data: ")) {
                                             try {
                                               const payload = JSON.parse(line.replace("data: ", ""));
-                                              if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                                              if (payload.type === "progress") {
+                                                 setSetupProgressNum(payload.value);
+                                              } else if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
                                                  pushLog(`[Setup] ${payload.message}`);
                                               } else if (payload.type === "stderr" || payload.type === "warning") {
                                                  pushLog(`[WARNING] ${payload.message}`);
@@ -2252,6 +2257,18 @@ FLAGS EXPLAINED:
                          </button>
                        </div>
                     </h3>
+
+                    {(isSettingUpNative || setupProgressNum > 0) && (
+                       <div className="pt-2 pb-2">
+                         <div className="flex justify-between items-center mb-1.5 border-b border-transparent">
+                           <span className="text-xs font-medium text-slate-300">安装进度 (Installation Progress)</span>
+                           <span className="text-xs font-mono text-blue-400">{setupProgressNum}%</span>
+                         </div>
+                         <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden shadow-inner border border-white/10">
+                           <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${setupProgressNum}%` }}></div>
+                         </div>
+                       </div>
+                    )}
 
                     <div className="space-y-4" id="guide-steps-checklist">
                       <div className="flex items-start space-x-3.5">

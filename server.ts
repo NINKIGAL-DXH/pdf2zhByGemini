@@ -617,57 +617,99 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
   const configPath = path.join(pdf2zhDataDir, "config.json");
   fs.writeFileSync(configPath, JSON.stringify({
     setupDate: new Date().toISOString(),
-    uninstallInstruction: `To completely clean up, simply delete this directory: ${pdf2zhDataDir} and run 'pip uninstall pdf2zh' in your terminal.`
+    uninstallInstruction: `To completely clean up, simply delete this directory: ${pdf2zhDataDir}. It contains a fully self-isolated virtual environment.`
   }, null, 2));
 
   sendLog("info", `Workspace configuration directory created safely at: ${pdf2zhDataDir}`);
 
-  // Test if command exists
-  const testProc = spawn("pdf2zh", ["--version"]);
-  let exists = false;
+  const venvDir = path.join(pdf2zhDataDir, "venv");
+  const isWin = process.platform === "win32";
+  const pythonCmd = isWin ? "python" : "python3";
+  const pipCmd = isWin ? path.join(venvDir, "Scripts", "pip.exe") : path.join(venvDir, "bin", "pip");
+  const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
+
+  // Step 1: Check if local venv pdf2zh already exists
+  const testProc = spawn(pdf2zhCmdLocal, ["--version"]);
   
   testProc.on("error", () => {
-    sendLog("warning", "pdf2zh command not found globally, attempting pip installation...");
+    sendLog("warning", "Local virtual environment pdf2zh not found. Proceeding with isolated installation...");
+    createVenvAndInstall();
   });
 
   testProc.on("close", (code) => {
     if (code === 0) {
-      sendLog("success", "pdf2zh is already installed and globally available!");
+      sendLog("success", "pdf2zh is already installed in the isolated virtual environment!");
       res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
       res.end();
     } else {
-      // Proceed to pip install
-      sendLog("info", "Executing: pip install pdf2zh");
-      // Fallback for sandboxes without pip or trying to run pip3
-      const pipCommand = process.platform === "win32" ? "pip" : "pip3";
-      
-      const pipProc = spawn(pipCommand, ["install", "pdf2zh"]);
-      
-      pipProc.stdout.on("data", (data) => {
-        sendLog("stdout", data.toString());
-      });
-      
-      pipProc.stderr.on("data", (data) => {
-        sendLog("stderr", data.toString());
-      });
-      
-      pipProc.on("close", (pipCode) => {
-        if (pipCode === 0) {
-          sendLog("success", "pdf2zh successfully installed via pip!");
-        } else {
-          sendLog("error", `pip install failed with code ${pipCode}. You may need to install Python/pip manually.`);
-        }
-        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed." })}\n\n`);
-        res.end();
-      });
-      
-      pipProc.on("error", (err) => {
-         sendLog("error", `Failed to spawn pip command: ${err.message}. Please install python and pip on this machine, then try again.`);
-         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
-         res.end();
-      });
+      createVenvAndInstall();
     }
   });
+
+  function createVenvAndInstall() {
+    sendLog("info", `Creating self-contained python virtual environment at: ${venvDir}`);
+    res.write(`data: ${JSON.stringify({ type: "progress", value: 10 })}\n\n`);
+    const venvProc = spawn(pythonCmd, ["-m", "venv", venvDir]);
+    
+    venvProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
+    venvProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
+    
+    venvProc.on("close", (code) => {
+       if (code !== 0) {
+          sendLog("error", `Failed to create virtual environment (code ${code}). Please ensure python3-venv is installed.`);
+          res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done", message: "Setup failed during venv creation." })}\n\n`);
+          return res.end();
+       }
+       
+       sendLog("success", "Virtual environment created successfully. Installing pdf2zh...");
+       res.write(`data: ${JSON.stringify({ type: "progress", value: 30 })}\n\n`);
+       sendLog("info", `Executing: ${pipCmd} install pdf2zh (this may take a few minutes)`);
+       
+       const pipProc = spawn(pipCmd, ["install", "pdf2zh"]);
+       
+       let currentProgress = 30;
+       
+       pipProc.stdout.on("data", (data) => {
+         const out = data.toString();
+         sendLog("stdout", out);
+         if (out.includes("Collecting") || out.includes("Downloading")) {
+            currentProgress = Math.min(currentProgress + 1, 95);
+            res.write(`data: ${JSON.stringify({ type: "progress", value: currentProgress })}\n\n`);
+         }
+       });
+       
+       pipProc.stderr.on("data", (data) => {
+         sendLog("stderr", data.toString());
+       });
+       
+       pipProc.on("close", (pipCode) => {
+         if (pipCode === 0) {
+           sendLog("success", "pdf2zh successfully installed in isolated environment!");
+           res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+         } else {
+           sendLog("error", `pip install failed with code ${pipCode}. Check your python/pip setup.`);
+           res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+         }
+         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed." })}\n\n`);
+         res.end();
+       });
+       
+       pipProc.on("error", (err) => {
+          sendLog("error", `Failed to span pip command: ${err.message}.`);
+          res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
+          res.end();
+       });
+    });
+    
+    venvProc.on("error", (err) => {
+       sendLog("error", `Failed to execute python venv: ${err.message}`);
+       res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+       res.write(`data: ${JSON.stringify({ type: "done", message: "Setup failed." })}\n\n`);
+       res.end();
+    });
+  }
 });
 
 // API to Uninstall Local pdf2zh instance and clean workspace
@@ -680,40 +722,18 @@ app.post("/api/pdf2zh-uninstall", async (req, res) => {
     res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
   };
 
-  sendLog("info", "Starting native pdf2zh cleanup/uninstallation...");
+  sendLog("info", "Starting native pdf2zh cleanup and workspace removal...");
+  sendLog("info", `Deleting self-contained workspace directory: ${pdf2zhDataDir}`);
 
-  const pipCommand = process.platform === "win32" ? "pip" : "pip3";
-  sendLog("info", `Executing: ${pipCommand} uninstall -y pdf2zh`);
-  
-  const pipProc = spawn(pipCommand, ["uninstall", "-y", "pdf2zh"]);
-  
-  pipProc.stdout.on("data", (data) => {
-    sendLog("stdout", data.toString());
-  });
-  
-  pipProc.stderr.on("data", (data) => {
-    sendLog("stderr", data.toString());
-  });
-
-  pipProc.on("close", (code) => {
-    sendLog(code === 0 ? "success" : "warning", `pip uninstall finished with code ${code}.`);
-    
-    sendLog("info", `Removing workspace directory: ${pdf2zhDataDir}`);
-    // Clean up the data dir completely regardless of pip success
-    fs.rm(pdf2zhDataDir, { recursive: true, force: true }, (err) => {
-       if (err) {
-         sendLog("error", `Failed to remove directory: ${err.message}`);
-       } else {
-         sendLog("success", "Workspace directory deleted successfully.");
-       }
-       res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed." })}\n\n`);
-       res.end();
-    });
-  });
-
-  pipProc.on("error", (err) => {
-     sendLog("error", `Failed to span pip uninstall: ${err.message}`);
-     res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed with errors." })}\n\n`);
+  // Delete the data dir completely
+  fs.rm(pdf2zhDataDir, { recursive: true, force: true }, (err) => {
+     if (err) {
+       sendLog("error", `Failed to remove directory: ${err.message}`);
+       res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed with errors." })}\n\n`);
+     } else {
+       sendLog("success", "Workspace directory and isolated virtual environment deleted successfully.");
+       res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall and cleanup completed perfectly." })}\n\n`);
+     }
      res.end();
   });
 });
@@ -767,10 +787,17 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      envVars.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   }
 
-  sendLog("info", `Executing command: pdf2zh ${args.join(" ")}`);
+  const venvDir = path.join(pdf2zhDataDir, "venv");
+  const isWin = process.platform === "win32";
+  const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
+
+  // Fallback to global pdf2zh if venv doesn't exist just in case they installed it globally
+  const commandToRun = fs.existsSync(pdf2zhCmdLocal) ? pdf2zhCmdLocal : "pdf2zh";
+
+  sendLog("info", `Executing command: ${commandToRun} ${args.join(" ")}`);
   sendLog("info", "Working directory: " + pdf2zhDataDir);
 
-  const proc = spawn("pdf2zh", args, { cwd: pdf2zhDataDir, env: envVars });
+  const proc = spawn(commandToRun, args, { cwd: pdf2zhDataDir, env: envVars });
 
   proc.stdout.on("data", (data) => {
     sendLog("stdout", data.toString());
