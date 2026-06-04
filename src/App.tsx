@@ -618,13 +618,18 @@ export default function App() {
        const decoder = new TextDecoder();
        
        let doneState = false;
+       let buffer = "";
        while (!doneState) {
           const { value, done } = await reader.read();
           doneState = done;
           if (value) {
-            const chunk = decoder.decode(value);
-            const lines = chunk.split("\n\n");
-            for (const line of lines) {
+            buffer += decoder.decode(value, { stream: true });
+            let processIdx = buffer.indexOf("\n\n");
+            while (processIdx !== -1) {
+              const line = buffer.substring(0, processIdx);
+              buffer = buffer.substring(processIdx + 2);
+              processIdx = buffer.indexOf("\n\n");
+              
                if (line.startsWith("data: ")) {
                   try {
                     const payload = JSON.parse(line.replace("data: ", ""));
@@ -2143,13 +2148,18 @@ FLAGS EXPLAINED:
                                  const reader = response.body.getReader();
                                  const decoder = new TextDecoder();
                                  let doneState = false;
+                                 let buffer = "";
                                  while (!doneState) {
                                     const { value, done } = await reader.read();
                                     doneState = done;
                                     if (value) {
-                                      const chunk = decoder.decode(value);
-                                      const lines = chunk.split("\n\n");
-                                      for (const line of lines) {
+                                      buffer += decoder.decode(value, { stream: true });
+                                      let processIdx = buffer.indexOf("\n\n");
+                                      while (processIdx !== -1) {
+                                        const line = buffer.substring(0, processIdx);
+                                        buffer = buffer.substring(processIdx + 2);
+                                        processIdx = buffer.indexOf("\n\n");
+                                        
                                          if (line.startsWith("data: ")) {
                                             try {
                                               const payload = JSON.parse(line.replace("data: ", ""));
@@ -2199,13 +2209,18 @@ FLAGS EXPLAINED:
                                  const reader = response.body.getReader();
                                  const decoder = new TextDecoder();
                                  let doneState = false;
+                                 let buffer = "";
                                  while (!doneState) {
                                     const { value, done } = await reader.read();
                                     doneState = done;
                                     if (value) {
-                                      const chunk = decoder.decode(value);
-                                      const lines = chunk.split("\n\n");
-                                      for (const line of lines) {
+                                      buffer += decoder.decode(value, { stream: true });
+                                      let processIdx = buffer.indexOf("\n\n");
+                                      while (processIdx !== -1) {
+                                        const line = buffer.substring(0, processIdx);
+                                        buffer = buffer.substring(processIdx + 2);
+                                        processIdx = buffer.indexOf("\n\n");
+                                        
                                          if (line.startsWith("data: ")) {
                                             try {
                                               const payload = JSON.parse(line.replace("data: ", ""));

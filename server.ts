@@ -676,7 +676,7 @@ app.post("/api/pdf2zh-uninstall", async (req, res) => {
     sendLog(code === 0 ? "success" : "warning", `pip uninstall finished with code ${code}.`);
     
     sendLog("info", `Removing workspace directory: ${pdf2zhDataDir}`);
-    // Clean up the data dir completely
+    // Clean up the data dir completely regardless of pip success
     fs.rm(pdf2zhDataDir, { recursive: true, force: true }, (err) => {
        if (err) {
          sendLog("error", `Failed to remove directory: ${err.message}`);
@@ -792,6 +792,10 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
 app.get("/api/pdf2zh-download/:filename", (req, res) => {
    const filename = req.params.filename;
    const filepath = path.join(pdf2zhDataDir, "uploads", filename);
+   // Prevent directory traversal
+   if (!filepath.startsWith(path.join(pdf2zhDataDir, "uploads"))) {
+       return res.status(403).send("Forbidden path");
+   }
    if (fs.existsSync(filepath)) {
        res.download(filepath);
    } else {
