@@ -16,17 +16,40 @@ app.use(express.json({ limit: "50mb" }));
 
 // PDF2ZH Native Execution working directory (Cleanly uninstallable)
 // Using an explicit designated folder in the system so users can cleanly delete it.
-const pdf2zhDataDir = path.join(os.homedir(), ".pdf2zh_gui_workspace");
-if (!fs.existsSync(pdf2zhDataDir)) {
-  fs.mkdirSync(pdf2zhDataDir, { recursive: true });
+let pdf2zhDataDir = "";
+try {
+  pdf2zhDataDir = path.join(os.homedir(), ".pdf2zh_gui_workspace");
+  if (!fs.existsSync(pdf2zhDataDir)) {
+    fs.mkdirSync(pdf2zhDataDir, { recursive: true });
+  }
+} catch (err) {
+  try {
+    console.warn("Failed to create workspace in homedir, falling back to tmpdir:", err);
+    pdf2zhDataDir = path.join(os.tmpdir(), ".pdf2zh_gui_workspace");
+    if (!fs.existsSync(pdf2zhDataDir)) {
+      fs.mkdirSync(pdf2zhDataDir, { recursive: true });
+    }
+  } catch (err2) {
+    console.warn("Failed to create workspace in tmpdir, falling back to cwd:", err2);
+    pdf2zhDataDir = path.join(process.cwd(), ".pdf2zh_gui_workspace");
+    if (!fs.existsSync(pdf2zhDataDir)) {
+      fs.mkdirSync(pdf2zhDataDir, { recursive: true });
+    }
+  }
 }
 
 // Multer storage for uploaded PDFs waiting for native python translation
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(pdf2zhDataDir, "uploads");
-    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
+    try {
+      if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    } catch (err) {
+      console.error("Failed to create uploads directory:", err);
+      // Fallback to os.tmpdir() directly
+      cb(null, os.tmpdir());
+    }
   },
   filename: (req, file, cb) => {
     // Ensure safe file names
