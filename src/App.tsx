@@ -589,10 +589,10 @@ export default function App() {
        // Since EventSource doesn't support POST with FormData, 
        // we will first upload the file, get a temporary filename to pass, or use XMLHttpRequest with streaming/fetch.
        const formData = new FormData();
-       if (selectedFile?.rawFileData) {
-         formData.append("file", selectedFile.rawFileData);
+       if (selectedFile?.rawFile) {
+         formData.append("file", selectedFile.rawFile);
        } else {
-         pushLog("[ERROR] Cannot find raw PDF file. Please re-upload.");
+         pushLog("[ERROR] Cannot find raw PDF file. Please upload a real PDF for Native Engine.");
          return;
        }
        
