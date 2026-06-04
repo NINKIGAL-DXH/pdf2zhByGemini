@@ -105,6 +105,10 @@ export default function App() {
     message?: string;
   }>({ testing: false });
 
+  // Execute Mode Toggle (Sandbox vs Native pdf2zh)
+  const [executeMode, setExecuteMode] = useState<"sandbox" | "native">("sandbox");
+  const [isSettingUpNative, setIsSettingUpNative] = useState(false);
+
   // Terminal logging & Progress state
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [currentProgressStep, setCurrentProgressStep] = useState<string>("idle");
@@ -564,8 +568,119 @@ export default function App() {
   };
 
   // Translation executor
+  const startNativeTranslation = async () => {
+    setTerminalLogs([]);
+    setTranslationProgress(0);
+    setCurrentProgressStep("translating");
+    setActiveTab("translate");
+    setTranslationWarning(null);
+    setTranslationError(null);
+
+    let currentLogs: string[] = [];
+    const pushLog = (txt: string) => {
+      currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
+      setTerminalLogs(currentLogs);
+    };
+
+    pushLog(`[Native Engine] Booting python pdf2zh tool natively for ${selectedFile?.name}...`);
+    
+    try {
+       // Since EventSource doesn't support POST with FormData, 
+       // we will first upload the file, get a temporary filename to pass, or use XMLHttpRequest with streaming/fetch.
+       const formData = new FormData();
+       if (selectedFile?.rawFileData) {
+         formData.append("file", selectedFile.rawFileData);
+       } else {
+         pushLog("[ERROR] Cannot find raw PDF file. Please re-upload.");
+         return;
+       }
+       
+       const prov = providers[selectedProviderIdx];
+       formData.append("sourceLang", params.sourceLang);
+       formData.append("targetLang", params.targetLang);
+       formData.append("provider", prov.provider);
+       formData.append("model", prov.model);
+       if (prov.endpoint) formData.append("endpoint", prov.endpoint);
+       if (prov.apiKey) formData.append("apiKey", prov.apiKey);
+       formData.append("threads", "4");
+
+       pushLog(`[Native Engine] Issuing multipart request to Node Backend...`);
+       
+       // Using fetch to read stream
+       const response = await fetch("/api/pdf2zh-translate", {
+          method: "POST",
+          body: formData
+       });
+
+       if (!response.body) throw new Error("No response body");
+
+       const reader = response.body.getReader();
+       const decoder = new TextDecoder();
+       
+       let doneState = false;
+       while (!doneState) {
+          const { value, done } = await reader.read();
+          doneState = done;
+          if (value) {
+            const chunk = decoder.decode(value);
+            const lines = chunk.split("\n\n");
+            for (const line of lines) {
+               if (line.startsWith("data: ")) {
+                  try {
+                    const payload = JSON.parse(line.replace("data: ", ""));
+                    if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                       pushLog(`[pdf2zh] ${payload.message}`);
+                    } else if (payload.type === "stderr" || payload.type === "warning") {
+                       pushLog(`[WARNING] ${payload.message}`);
+                    } else if (payload.type === "error") {
+                       pushLog(`[FAILED] ${payload.message || payload.error}`);
+                       setTranslationError(payload.message || payload.error);
+                    } else if (payload.type === "done") {
+                       if (payload.error) {
+                          setTranslationError(payload.error);
+                       } else {
+                          pushLog("[SUCCESS] Native translation completed!");
+                          setCurrentProgressStep("completed");
+                          setTranslationProgress(100);
+                          
+                          // Convert the native output into our schema temporarily so we can download it.
+                          const dummyDoc: TranslatedDoc = {
+                            id: "doc_native_" + Date.now(),
+                            fileName: selectedFile?.name || "translated",
+                            fileSize: selectedFile?.size || "0 KB",
+                            pageCount: selectedFile?.pageCount || 1,
+                            translatedAt: new Date().toLocaleString(),
+                            params: { ...params },
+                            providerConfig: { provider: prov.provider, model: prov.model },
+                            pages: [],
+                            status: "completed",
+                            progress: 100,
+                            nativeDownloadUrls: payload.files
+                          };
+                          setActiveTranslatingDoc(dummyDoc);
+                          
+                          // Don't save to history for native since history depends on our block-schema rendering, 
+                          // native yields final PDFs directly.
+                       }
+                    }
+                  } catch(e) {}
+               }
+            }
+          }
+       }
+    } catch(err: any) {
+        pushLog(`[CRASH] ${err.message}`);
+        setTranslationError(err.message);
+    }
+  };
+
   const startTranslation = async () => {
     if (!selectedFile) return;
+
+    if (executeMode === "native") {
+      startNativeTranslation();
+      return;
+    }
 
     // 1. Initial status transitions
     setTerminalLogs([]);
@@ -1101,9 +1216,14 @@ export default function App() {
               </p>
             </div>
 
-            <div className="flex items-center space-x-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="text-[10px] font-mono text-slate-400">Local Sandbox Server: Online</span>
+            <div className="flex items-center space-x-3 bg-black/40 border border-white/5 rounded-full px-3 py-1.5">
+              <span className={`h-2 w-2 rounded-full ${executeMode === "native" ? "bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]" : "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"} animate-pulse`}></span>
+              <div className="flex items-center space-x-1.5 cursor-pointer" onClick={() => setExecuteMode(executeMode === "sandbox" ? "native" : "sandbox")}>
+                <span className="text-[10px] font-mono font-bold tracking-widest uppercase transition-colors hover:text-white" style={{ color: executeMode === "native" ? "#c084fc" : "#94a3b8" }}>
+                  {executeMode === "native" ? "Engine: Native pdf2zh" : "Engine: Browser Sandbox"}
+                </span>
+                <span className="text-slate-500 font-mono text-[9px] border border-slate-600 hover:border-slate-300 rounded px-1 lowercase transition-all">switch</span>
+              </div>
             </div>
           </div>
 
@@ -1587,26 +1707,45 @@ export default function App() {
                           </div>
 
                           <div className="flex flex-wrap gap-2 justify-end w-full md:w-auto">
-                            <button
-                              onClick={() => exportHighFidelityPDF(activeTranslatingDoc)}
-                              disabled={isExportingPDF}
-                              className={`px-3 py-1.5 rounded text-xs border font-medium transition flex items-center space-x-1 cursor-pointer ${
-                                isExportingPDF 
-                                  ? "bg-slate-800 text-slate-500 border-slate-700 pointer-events-none animate-pulse" 
-                                  : "bg-white/5 hover:bg-white/10 text-white border-white/10"
-                              }`}
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span>{isExportingPDF ? "Exporting PDF..." : "Download Mono PDF"}</span>
-                            </button>
+                            {activeTranslatingDoc.nativeDownloadUrls ? (
+                               <>
+                                  {activeTranslatingDoc.nativeDownloadUrls.mono && (
+                                     <a href={activeTranslatingDoc.nativeDownloadUrls.mono} download className="px-3 py-1.5 rounded text-xs border font-medium transition flex items-center space-x-1 cursor-pointer bg-white/5 hover:bg-white/10 text-white border-white/10 hover:border-blue-400">
+                                       <Download className="w-3.5 h-3.5 text-blue-400" />
+                                       <span>Download Mono PDF (单语下载)</span>
+                                     </a>
+                                  )}
+                                  {activeTranslatingDoc.nativeDownloadUrls.dual && (
+                                     <a href={activeTranslatingDoc.nativeDownloadUrls.dual} download className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold transition border border-blue-500/30 shadow-lg shadow-blue-900/30 flex items-center space-x-2 cursor-pointer">
+                                       <Download className="w-3.5 h-3.5" />
+                                       <span>Download Dual-Bilingual PDF (双语下载)</span>
+                                     </a>
+                                  )}
+                               </>
+                            ) : (
+                               <>
+                                  <button
+                                    onClick={() => exportHighFidelityPDF(activeTranslatingDoc)}
+                                    disabled={isExportingPDF}
+                                    className={`px-3 py-1.5 rounded text-xs border font-medium transition flex items-center space-x-1 cursor-pointer ${
+                                      isExportingPDF 
+                                        ? "bg-slate-800 text-slate-500 border-slate-700 pointer-events-none animate-pulse" 
+                                        : "bg-white/5 hover:bg-white/10 text-white border-white/10"
+                                    }`}
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>{isExportingPDF ? "Exporting PDF..." : "Download Mono PDF"}</span>
+                                  </button>
 
-                            <button
-                              onClick={() => setActiveReaderDoc(activeTranslatingDoc)}
-                              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold transition border border-blue-500/30 shadow-lg shadow-blue-900/30 flex items-center space-x-2 animate-bounce cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>Open Layout Preserved Reader Viewer (开启双语对照排版阅读器)</span>
-                            </button>
+                                  <button
+                                    onClick={() => setActiveReaderDoc(activeTranslatingDoc)}
+                                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-semibold transition border border-blue-500/30 shadow-lg shadow-blue-900/30 flex items-center space-x-2 animate-bounce cursor-pointer"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Open Layout Preserved Reader Viewer (开启双语对照排版阅读器)</span>
+                                  </button>
+                               </>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1978,9 +2117,67 @@ FLAGS EXPLAINED:
                   id="tab-guide"
                 >
                   <div className="bg-white/5 border border-white/5 rounded-xl p-6 shadow-lg space-y-6" id="guide-install-flow">
-                    <h3 className="text-sm font-semibold text-white font-display flex items-center gap-1.5 border-b border-white/5 pb-2">
-                      <Terminal className="w-4 h-4 text-blue-400" />
-                      <span>How to install & Deploy pdf2zh on macOS Terminal (本地配置流程)</span>
+                    <h3 className="text-sm font-semibold text-white font-display flex items-center justify-between border-b border-white/5 pb-2">
+                       <div className="flex items-center gap-1.5">
+                         <Terminal className="w-4 h-4 text-blue-400" />
+                         <span>How to install & Deploy pdf2zh on macOS Terminal (本地配置流程)</span>
+                       </div>
+                       
+                       <button
+                         onClick={async () => {
+                             setIsSettingUpNative(true);
+                             setTerminalLogs([]);
+                             setCurrentProgressStep("parsing"); // use parsing panel just to show logs
+                             setActiveTab("translate"); // jump to translate to show logs
+                             
+                             let currentLogs: string[] = [];
+                             const pushLog = (txt: string) => {
+                               currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
+                               setTerminalLogs(currentLogs);
+                             };
+                             
+                             try {
+                               const response = await fetch("/api/pdf2zh-setup", { method: "POST" });
+                               if (!response.body) throw new Error("No response");
+                               const reader = response.body.getReader();
+                               const decoder = new TextDecoder();
+                               let doneState = false;
+                               while (!doneState) {
+                                  const { value, done } = await reader.read();
+                                  doneState = done;
+                                  if (value) {
+                                    const chunk = decoder.decode(value);
+                                    const lines = chunk.split("\n\n");
+                                    for (const line of lines) {
+                                       if (line.startsWith("data: ")) {
+                                          try {
+                                            const payload = JSON.parse(line.replace("data: ", ""));
+                                            if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                                               pushLog(`[Setup] ${payload.message}`);
+                                            } else if (payload.type === "stderr" || payload.type === "warning") {
+                                               pushLog(`[WARNING] ${payload.message}`);
+                                            } else if (payload.type === "error") {
+                                               pushLog(`[FAILED] ${payload.message || payload.error}`);
+                                            } else if (payload.type === "done") {
+                                               pushLog(`[SUCCESS] Configuration completed! You can now toggle the Engine Switch above to Native.`);
+                                               setExecuteMode("native");
+                                            }
+                                          } catch(e) {}
+                                       }
+                                    }
+                                  }
+                               }
+                             } catch (err: any) {
+                                pushLog(`[CRASH] ${err.message}`);
+                             }
+                             setIsSettingUpNative(false);
+                         }}
+                         disabled={isSettingUpNative}
+                         className="flex items-center space-x-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-xs tracking-wide cursor-pointer transition shadow-lg shadow-blue-500/20"
+                       >
+                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                         <span>{isSettingUpNative ? "Setting up..." : "1-Click Native Config (一键本地配置)"}</span>
+                       </button>
                     </h3>
 
                     <div className="space-y-4" id="guide-steps-checklist">

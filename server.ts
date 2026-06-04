@@ -1,8 +1,11 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
+import multer from "multer";
+import { spawn } from "child_process";
 
 dotenv.config();
 
@@ -10,6 +13,28 @@ const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: "50mb" }));
+
+// PDF2ZH Native Execution working directory (Cleanly uninstallable)
+// Using an explicit designated folder in the system so users can cleanly delete it.
+const pdf2zhDataDir = path.join(os.homedir(), ".pdf2zh_gui_workspace");
+if (!fs.existsSync(pdf2zhDataDir)) {
+  fs.mkdirSync(pdf2zhDataDir, { recursive: true });
+}
+
+// Multer storage for uploaded PDFs waiting for native python translation
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadPath = path.join(pdf2zhDataDir, "uploads");
+    if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    // Ensure safe file names
+    cb(null, Date.now() + "-" + file.originalname.replace(/[^a-zA-Z0-9.\-]/g, "_"));
+  }
+});
+const upload = multer({ storage });
+
 
 // Resolve and serve the pdfjs-dist web worker locally under same-origin to pass iframe browser sandbox CORS blocks
 app.get("/pdf.worker.min.mjs", (req, res) => {
@@ -551,6 +576,179 @@ ${singleEnglishText}`;
       return res.status(500).json({ error: `Translation failed on both customized model and Backup Cloud Gemini backend: ${gemError.message || gemError}` });
     }
   }
+});
+
+// API to Setup/Install Local pdf2zh instance
+app.post("/api/pdf2zh-setup", async (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const sendLog = (type: string, message: string) => {
+    res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
+  };
+
+  sendLog("info", "Starting native pdf2zh one-click installation checking...");
+  
+  // Create configuration file tracker to ensure clean uninstall visibility
+  const configPath = path.join(pdf2zhDataDir, "config.json");
+  fs.writeFileSync(configPath, JSON.stringify({
+    setupDate: new Date().toISOString(),
+    uninstallInstruction: `To completely clean up, simply delete this directory: ${pdf2zhDataDir} and run 'pip uninstall pdf2zh' in your terminal.`
+  }, null, 2));
+
+  sendLog("info", `Workspace configuration directory created safely at: ${pdf2zhDataDir}`);
+
+  // Test if command exists
+  const testProc = spawn("pdf2zh", ["--version"]);
+  let exists = false;
+  
+  testProc.on("error", () => {
+    sendLog("warning", "pdf2zh command not found globally, attempting pip installation...");
+  });
+
+  testProc.on("close", (code) => {
+    if (code === 0) {
+      sendLog("success", "pdf2zh is already installed and globally available!");
+      res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
+      res.end();
+    } else {
+      // Proceed to pip install
+      sendLog("info", "Executing: pip install pdf2zh");
+      // Fallback for sandboxes without pip or trying to run pip3
+      const pipCommand = process.platform === "win32" ? "pip" : "pip3";
+      
+      const pipProc = spawn(pipCommand, ["install", "pdf2zh"]);
+      
+      pipProc.stdout.on("data", (data) => {
+        sendLog("stdout", data.toString());
+      });
+      
+      pipProc.stderr.on("data", (data) => {
+        sendLog("stderr", data.toString());
+      });
+      
+      pipProc.on("close", (pipCode) => {
+        if (pipCode === 0) {
+          sendLog("success", "pdf2zh successfully installed via pip!");
+        } else {
+          sendLog("error", `pip install failed with code ${pipCode}. You may need to install Python/pip manually.`);
+        }
+        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed." })}\n\n`);
+        res.end();
+      });
+      
+      pipProc.on("error", (err) => {
+         sendLog("error", `Failed to spawn pip command: ${err.message}. Please install python and pip on this machine, then try again.`);
+         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
+         res.end();
+      });
+    }
+  });
+});
+
+// API to run actual PDFMathTranslate/pdf2zh Python script
+app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No PDF file uploaded" });
+  }
+
+  const { sourceLang, targetLang, provider, model, endpoint, apiKey, threads } = req.body;
+  const filePath = req.file.path;
+  const fileName = req.file.filename;
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const sendLog = (type: string, message: string) => {
+    res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
+  };
+
+  sendLog("info", `Initiating native PDFMathTranslate (pdf2zh) for ${req.file.originalname}`);
+  
+  // Construct arguments based on pdf2zh documentation
+  const args = [filePath];
+  
+  if (sourceLang) { args.push("-li"); args.push(sourceLang === "English" ? "en" : sourceLang); }
+  if (targetLang) { args.push("-lo"); args.push(targetLang === "Chinese (Simplified)" ? "zh" : targetLang); }
+  
+  if (threads) { args.push("-t"); args.push(String(threads)); }
+  
+  if (provider === "gemini") {
+     args.push("-s"); args.push("gemini"); // Note: real pdf2zh doesn't natively support gemini without extra config maybe, but we passthrough
+  } else if (provider === "openai" || provider === "lmstudio" || provider === "omlx") {
+     args.push("-s"); args.push("openai"); // pdf2zh uses openai compatible format
+  }
+  
+  if (model) {
+     args.push("-m"); args.push(model);
+  }
+
+  const envVars = { ...process.env };
+  if (endpoint) {
+     envVars.OPENAI_BASE_URL = endpoint.endsWith("/chat/completions") ? endpoint.replace("/chat/completions", "") : endpoint;
+  }
+  if (apiKey) {
+     envVars.OPENAI_API_KEY = apiKey;
+  }
+  if (provider === "gemini" && process.env.GEMINI_API_KEY) {
+     envVars.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  }
+
+  sendLog("info", `Executing command: pdf2zh ${args.join(" ")}`);
+  sendLog("info", "Working directory: " + pdf2zhDataDir);
+
+  const proc = spawn("pdf2zh", args, { cwd: pdf2zhDataDir, env: envVars });
+
+  proc.stdout.on("data", (data) => {
+    sendLog("stdout", data.toString());
+  });
+
+  proc.stderr.on("data", (data) => {
+    sendLog("stderr", data.toString());
+  });
+
+  proc.on("error", (err) => {
+    sendLog("error", `Failed to spawn pdf2zh check your setup: ${err.message}`);
+    res.write(`data: ${JSON.stringify({ type: "done", error: err.message })}\n\n`);
+    res.end();
+  });
+
+  proc.on("close", (code) => {
+    if (code !== 0) {
+      sendLog("error", `pdf2zh execution exited with error code ${code}`);
+      res.write(`data: ${JSON.stringify({ type: "done", error: "Translation process failed" })}\n\n`);
+    } else {
+      sendLog("success", "pdf2zh successfully localized the document!");
+      
+      // Attempt to resolve generated output files:
+      // pdf2zh defaults output names based on original file, let's verify what's outputted
+      const parsedPath = path.parse(filePath);
+      const monoPath = path.join(pdf2zhDataDir, "uploads", `${parsedPath.name}-mono.pdf`);
+      const dualPath = path.join(pdf2zhDataDir, "uploads", `${parsedPath.name}-dual.pdf`);
+      
+      res.write(`data: ${JSON.stringify({ 
+        type: "done", 
+        message: "Success",
+        files: {
+          mono: fs.existsSync(monoPath) ? `/api/pdf2zh-download/${path.basename(monoPath)}` : null,
+          dual: fs.existsSync(dualPath) ? `/api/pdf2zh-download/${path.basename(dualPath)}` : null
+        }
+      })}\n\n`);
+    }
+    res.end();
+  });
+});
+
+app.get("/api/pdf2zh-download/:filename", (req, res) => {
+   const filename = req.params.filename;
+   const filepath = path.join(pdf2zhDataDir, "uploads", filename);
+   if (fs.existsSync(filepath)) {
+       res.download(filepath);
+   } else {
+       res.status(404).send("File not found");
+   }
 });
 
 // Serve frontend assets via Vite in development, or standard express static in production

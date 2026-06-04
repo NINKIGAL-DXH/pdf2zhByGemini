@@ -439,9 +439,9 @@ export async function parsePDFFile(file: File, translateFigures: boolean = false
             blockType = "figure";
           } else if (pctY > 88 && cleanedText.length < 120) {
             blockType = "footer";
-          } else if (cleanedText.length < 150 && (cleanedText.match(/\d/g)?.length || 0) > cleanedText.length * 0.25) {
+          } else if (cleanedText.length < 500 && (cleanedText.match(/\d/g)?.length || 0) > cleanedText.length * 0.15) {
             blockType = "figure"; // Numeric heavy data in tables
-          } else if (g.lines.length <= 2 && cleanedText.length < 50 && !/[.!?]$/.test(cleanedText)) {
+          } else if (g.lines.length <= 3 && cleanedText.length < 100 && !/[.!?]$/.test(cleanedText)) {
             blockType = "figure"; // Short tabular fragments and values
           }
 

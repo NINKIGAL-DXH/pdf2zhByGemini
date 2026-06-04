@@ -54,4 +54,5 @@ export interface TranslatedDoc {
   pages: PDFPage[];
   status: "idle" | "parsing" | "translating" | "assembling" | "completed" | "failed";
   progress: number; // 0 to 100
+  nativeDownloadUrls?: { mono: string | null; dual: string | null };
 }
