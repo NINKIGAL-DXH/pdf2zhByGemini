@@ -2123,61 +2123,119 @@ FLAGS EXPLAINED:
                          <span>How to install & Deploy pdf2zh on macOS Terminal (本地配置流程)</span>
                        </div>
                        
-                       <button
-                         onClick={async () => {
-                             setIsSettingUpNative(true);
-                             setTerminalLogs([]);
-                             setCurrentProgressStep("parsing"); // use parsing panel just to show logs
-                             setActiveTab("translate"); // jump to translate to show logs
-                             
-                             let currentLogs: string[] = [];
-                             const pushLog = (txt: string) => {
-                               currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
-                               setTerminalLogs(currentLogs);
-                             };
-                             
-                             try {
-                               const response = await fetch("/api/pdf2zh-setup", { method: "POST" });
-                               if (!response.body) throw new Error("No response");
-                               const reader = response.body.getReader();
-                               const decoder = new TextDecoder();
-                               let doneState = false;
-                               while (!doneState) {
-                                  const { value, done } = await reader.read();
-                                  doneState = done;
-                                  if (value) {
-                                    const chunk = decoder.decode(value);
-                                    const lines = chunk.split("\n\n");
-                                    for (const line of lines) {
-                                       if (line.startsWith("data: ")) {
-                                          try {
-                                            const payload = JSON.parse(line.replace("data: ", ""));
-                                            if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
-                                               pushLog(`[Setup] ${payload.message}`);
-                                            } else if (payload.type === "stderr" || payload.type === "warning") {
-                                               pushLog(`[WARNING] ${payload.message}`);
-                                            } else if (payload.type === "error") {
-                                               pushLog(`[FAILED] ${payload.message || payload.error}`);
-                                            } else if (payload.type === "done") {
-                                               pushLog(`[SUCCESS] Configuration completed! You can now toggle the Engine Switch above to Native.`);
-                                               setExecuteMode("native");
-                                            }
-                                          } catch(e) {}
-                                       }
+                       <div className="flex items-center space-x-2">
+                         <button
+                           onClick={async () => {
+                               setIsSettingUpNative(true);
+                               setTerminalLogs([]);
+                               setCurrentProgressStep("parsing"); // use parsing panel just to show logs
+                               setActiveTab("translate"); // jump to translate to show logs
+                               
+                               let currentLogs: string[] = [];
+                               const pushLog = (txt: string) => {
+                                 currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
+                                 setTerminalLogs(currentLogs);
+                               };
+                               
+                               try {
+                                 const response = await fetch("/api/pdf2zh-uninstall", { method: "POST" });
+                                 if (!response.body) throw new Error("No response");
+                                 const reader = response.body.getReader();
+                                 const decoder = new TextDecoder();
+                                 let doneState = false;
+                                 while (!doneState) {
+                                    const { value, done } = await reader.read();
+                                    doneState = done;
+                                    if (value) {
+                                      const chunk = decoder.decode(value);
+                                      const lines = chunk.split("\n\n");
+                                      for (const line of lines) {
+                                         if (line.startsWith("data: ")) {
+                                            try {
+                                              const payload = JSON.parse(line.replace("data: ", ""));
+                                              if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                                                 pushLog(`[Cleanup] ${payload.message}`);
+                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                                 pushLog(`[WARNING] ${payload.message}`);
+                                              } else if (payload.type === "error") {
+                                                 pushLog(`[FAILED] ${payload.message || payload.error}`);
+                                              } else if (payload.type === "done") {
+                                                 pushLog(`[SUCCESS] Cleanup and Uninstallation completed! Engine Switch set back to Sandbox.`);
+                                                 setExecuteMode("sandbox");
+                                              }
+                                            } catch(e) {}
+                                         }
+                                      }
                                     }
-                                  }
+                                 }
+                               } catch (err: any) {
+                                  pushLog(`[CRASH] ${err.message}`);
                                }
-                             } catch (err: any) {
-                                pushLog(`[CRASH] ${err.message}`);
-                             }
-                             setIsSettingUpNative(false);
-                         }}
-                         disabled={isSettingUpNative}
-                         className="flex items-center space-x-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-xs tracking-wide cursor-pointer transition shadow-lg shadow-blue-500/20"
-                       >
-                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                         <span>{isSettingUpNative ? "Setting up..." : "1-Click Native Config (一键本地配置)"}</span>
-                       </button>
+                               setIsSettingUpNative(false);
+                           }}
+                           disabled={isSettingUpNative}
+                           className="flex items-center space-x-1 px-3 py-1 bg-rose-600/20 text-rose-400 hover:bg-rose-600 hover:text-white disabled:opacity-50 rounded text-xs tracking-wide cursor-pointer transition border border-rose-500/30"
+                         >
+                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                           <span>Clean Up (彻底卸载)</span>
+                         </button>
+
+                         <button
+                           onClick={async () => {
+                               setIsSettingUpNative(true);
+                               setTerminalLogs([]);
+                               setCurrentProgressStep("parsing"); // use parsing panel just to show logs
+                               setActiveTab("translate"); // jump to translate to show logs
+                               
+                               let currentLogs: string[] = [];
+                               const pushLog = (txt: string) => {
+                                 currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
+                                 setTerminalLogs(currentLogs);
+                               };
+                               
+                               try {
+                                 const response = await fetch("/api/pdf2zh-setup", { method: "POST" });
+                                 if (!response.body) throw new Error("No response");
+                                 const reader = response.body.getReader();
+                                 const decoder = new TextDecoder();
+                                 let doneState = false;
+                                 while (!doneState) {
+                                    const { value, done } = await reader.read();
+                                    doneState = done;
+                                    if (value) {
+                                      const chunk = decoder.decode(value);
+                                      const lines = chunk.split("\n\n");
+                                      for (const line of lines) {
+                                         if (line.startsWith("data: ")) {
+                                            try {
+                                              const payload = JSON.parse(line.replace("data: ", ""));
+                                              if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                                                 pushLog(`[Setup] ${payload.message}`);
+                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                                 pushLog(`[WARNING] ${payload.message}`);
+                                              } else if (payload.type === "error") {
+                                                 pushLog(`[FAILED] ${payload.message || payload.error}`);
+                                              } else if (payload.type === "done") {
+                                                 pushLog(`[SUCCESS] Configuration completed! You can now toggle the Engine Switch above to Native.`);
+                                                 setExecuteMode("native");
+                                              }
+                                            } catch(e) {}
+                                         }
+                                      }
+                                    }
+                                 }
+                               } catch (err: any) {
+                                  pushLog(`[CRASH] ${err.message}`);
+                               }
+                               setIsSettingUpNative(false);
+                           }}
+                           disabled={isSettingUpNative}
+                           className="flex items-center space-x-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-xs tracking-wide cursor-pointer transition shadow-lg shadow-blue-500/20"
+                         >
+                           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                           <span>{isSettingUpNative ? "Processing..." : "1-Click Native Config (一键本地配置)"}</span>
+                         </button>
+                       </div>
                     </h3>
 
                     <div className="space-y-4" id="guide-steps-checklist">

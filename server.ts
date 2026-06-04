@@ -647,6 +647,54 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
   });
 });
 
+// API to Uninstall Local pdf2zh instance and clean workspace
+app.post("/api/pdf2zh-uninstall", async (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const sendLog = (type: string, message: string) => {
+    res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
+  };
+
+  sendLog("info", "Starting native pdf2zh cleanup/uninstallation...");
+
+  const pipCommand = process.platform === "win32" ? "pip" : "pip3";
+  sendLog("info", `Executing: ${pipCommand} uninstall -y pdf2zh`);
+  
+  const pipProc = spawn(pipCommand, ["uninstall", "-y", "pdf2zh"]);
+  
+  pipProc.stdout.on("data", (data) => {
+    sendLog("stdout", data.toString());
+  });
+  
+  pipProc.stderr.on("data", (data) => {
+    sendLog("stderr", data.toString());
+  });
+
+  pipProc.on("close", (code) => {
+    sendLog(code === 0 ? "success" : "warning", `pip uninstall finished with code ${code}.`);
+    
+    sendLog("info", `Removing workspace directory: ${pdf2zhDataDir}`);
+    // Clean up the data dir completely
+    fs.rm(pdf2zhDataDir, { recursive: true, force: true }, (err) => {
+       if (err) {
+         sendLog("error", `Failed to remove directory: ${err.message}`);
+       } else {
+         sendLog("success", "Workspace directory deleted successfully.");
+       }
+       res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed." })}\n\n`);
+       res.end();
+    });
+  });
+
+  pipProc.on("error", (err) => {
+     sendLog("error", `Failed to span pip uninstall: ${err.message}`);
+     res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed with errors." })}\n\n`);
+     res.end();
+  });
+});
+
 // API to run actual PDFMathTranslate/pdf2zh Python script
 app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   if (!req.file) {
