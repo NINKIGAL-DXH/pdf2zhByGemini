@@ -688,7 +688,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         // Instead of just calling huggingface_hub.cli directly which might be problematic, 
         // we run pdf2zh with a dummy command or trigger its model download, 
         // or we just use python to robustly download.
-        var pythonCode = "\nimport os\nimport sys\ntry:\n    from huggingface_hub import hf_hub_download\n    print(\"Downloading ONNX layout model...\")\n    hf_hub_download(repo_id=\"wybxc/DocLayout-YOLO-DocStructBench-onnx\", filename=\"doclayout_yolo_docstructbench_imgsz1024.onnx\")\n    print(\"Download completed successfully!\")\nexcept Exception as e:\n    print(f\"Error downloading model: {e}\", file=sys.stderr)\n    sys.exit(1)\n";
+        var pythonCode = "\nimport os\nimport sys\nimport time\n\ntry:\n    from huggingface_hub import hf_hub_download\n    print(\"Downloading ONNX layout model...\")\n    max_retries = 100\n    for attempt in range(max_retries):\n        try:\n            hf_hub_download(\n                repo_id=\"wybxc/DocLayout-YOLO-DocStructBench-onnx\", \n                filename=\"doclayout_yolo_docstructbench_imgsz1024.onnx\",\n                resume_download=True\n            )\n            print(\"Download completed successfully!\")\n            sys.exit(0)\n        except Exception as e:\n            print(f\"Attempt {attempt + 1} failed: {e}\", file=sys.stderr)\n            if attempt < max_retries - 1:\n                print(\"Network disconnected or error. Retrying in 5 seconds to resume download...\", file=sys.stderr)\n                time.sleep(5)\n            else:\n                sys.exit(1)\nexcept Exception as e:\n    print(f\"Error downloading model: {e}\", file=sys.stderr)\n    sys.exit(1)\n";
         var hfResolved = false;
         var hfProc = (0, child_process_1.spawn)(venvPythonCmd, ["-c", pythonCode], {
             env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" })
@@ -701,9 +701,9 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                 var line = textLines_1[_i];
                 if (!line.trim())
                     continue;
-                var match = line.match(/(\d+)%.*?\[.*?<\s*([^,]+),\s*([^\]]+)\]/);
+                var match = line.match(/(\d+)%\|.*?\|.*?\s+\[(?:.*?(?:<\s*([^,]+))?|.*?),\s*([^\]]+)\]/);
                 if (match) {
-                    res.write("data: ".concat(JSON.stringify({ type: "model_progress", percentage: parseInt(match[1], 10), eta: match[2].trim(), speed: match[3].trim() }), "\n\n"));
+                    res.write("data: ".concat(JSON.stringify({ type: "model_progress", percentage: parseInt(match[1], 10), eta: (match[2] || "00:00").trim(), speed: (match[3] || "N/A").trim() }), "\n\n"));
                 }
                 sendLog("stderr", line.trim());
             }
@@ -784,8 +784,8 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                 pipProc.stdout.on("data", function (data) {
                     var out = data.toString();
                     sendLog("stdout", out);
-                    if (out.includes("Collecting") || out.includes("Downloading")) {
-                        currentProgress = Math.min(currentProgress + 1, 95);
+                    if (out.includes("Collecting") || out.includes("Downloading") || out.includes("Installing")) {
+                        currentProgress = Math.min(currentProgress + 1, 80); // Cap at 80 for pip install so UI does not look stuck at 95, allows room for Model downloading if needed
                         res.write("data: ".concat(JSON.stringify({ type: "progress", value: currentProgress }), "\n\n"));
                     }
                 });

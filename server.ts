@@ -640,14 +640,31 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
      // we run pdf2zh with a dummy command or trigger its model download, 
      // or we just use python to robustly download.
      
-     const pythonCode = `
+          const pythonCode = `
 import os
 import sys
+import time
+
 try:
     from huggingface_hub import hf_hub_download
     print("Downloading ONNX layout model...")
-    hf_hub_download(repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx", filename="doclayout_yolo_docstructbench_imgsz1024.onnx")
-    print("Download completed successfully!")
+    max_retries = 100
+    for attempt in range(max_retries):
+        try:
+            hf_hub_download(
+                repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx", 
+                filename="doclayout_yolo_docstructbench_imgsz1024.onnx",
+                resume_download=True
+            )
+            print("Download completed successfully!")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}", file=sys.stderr)
+            if attempt < max_retries - 1:
+                print("Network disconnected or error. Retrying in 5 seconds to resume download...", file=sys.stderr)
+                time.sleep(5)
+            else:
+                sys.exit(1)
 except Exception as e:
     print(f"Error downloading model: {e}", file=sys.stderr)
     sys.exit(1)
@@ -664,9 +681,9 @@ except Exception as e:
         const textLines = text.split(/[\r\n]+/);
         for (const line of textLines) {
            if (!line.trim()) continue;
-           const match = line.match(/(\d+)%.*?\[.*?<\s*([^,]+),\s*([^\]]+)\]/);
+           const match = line.match(/(\d+)%\|.*?\|.*?\s+\[(?:.*?(?:<\s*([^,]+))?|.*?),\s*([^\]]+)\]/);
            if (match) {
-              res.write(`data: ${JSON.stringify({ type: "model_progress", percentage: parseInt(match[1], 10), eta: match[2].trim(), speed: match[3].trim() })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: "model_progress", percentage: parseInt(match[1], 10), eta: (match[2] || "00:00").trim(), speed: (match[3] || "N/A").trim() })}\n\n`);
            }
            sendLog("stderr", line.trim());
         }
@@ -795,8 +812,8 @@ except Exception as e:
          pipProc.stdout.on("data", (data) => {
            const out = data.toString();
            sendLog("stdout", out);
-           if (out.includes("Collecting") || out.includes("Downloading")) {
-              currentProgress = Math.min(currentProgress + 1, 95);
+           if (out.includes("Collecting") || out.includes("Downloading") || out.includes("Installing")) {
+              currentProgress = Math.min(currentProgress + 1, 80); // Cap at 80 for pip install so UI does not look stuck at 95, allows room for Model downloading if needed
               res.write(`data: ${JSON.stringify({ type: "progress", value: currentProgress })}\n\n`);
            }
          });

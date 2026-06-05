@@ -1,25 +1,14 @@
 const fs = require('fs');
-let code = fs.readFileSync('server.ts', 'utf8');
 
-code = code.replace(
-  `        });
-        
-        pipProc.on("error", (err) => {
-           sendLog("error", \`Failed to span pip command: \${err.message}.\`);
-           res.write(\`data: \${JSON.stringify({ type: "progress", value: 0 })}\\n\\n\`);
-           res.write(\`data: \${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\\n\\n\`);
-           res.end();
-        });`,
-  `          pipProc.on("error", (err) => {
-             sendLog("error", \`Failed to span pip command: \${err.message}.\`);
-             res.write(\`data: \${JSON.stringify({ type: "progress", value: 0 })}\\n\\n\`);
-             res.write(\`data: \${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\\n\\n\`);
-             res.end();
-          });
-        });
-        
-        pipUpgradeProc.on("error", (err) => {
-           sendLog("warning", \`Failed to span pip upgrade command: \${err.message}. It will try proceeding with default pip version.\`);
-        });`
+let s = fs.readFileSync('server.ts', 'utf8');
+
+s = s.replace(
+  /currentProgress = Math\.min\(currentProgress \+ 1, 95\);/g,
+  `currentProgress = Math.min(currentProgress + 1, 80); // Cap at 80 for pip install so UI does not look stuck at 95, allows room for Model downloading if needed`
 );
-fs.writeFileSync('server.ts', code);
+s = s.replace(
+  /if \(out\.includes\("Collecting"\) \|\| out\.includes\("Downloading"\)\) \{/g,
+  `if (out.includes("Collecting") || out.includes("Downloading") || out.includes("Installing")) {`
+);
+
+fs.writeFileSync('server.ts', s);
