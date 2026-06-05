@@ -653,6 +653,7 @@ except Exception as e:
     sys.exit(1)
 `;
      
+     let hfResolved = false;
      const hfProc = spawn(venvPythonCmd, ["-c", pythonCode], {
         env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" }
      });
@@ -671,6 +672,8 @@ except Exception as e:
         }
      });
      hfProc.on("close", (code) => {
+        if (hfResolved) return;
+        hfResolved = true;
         if (code === 0) {
            sendLog("success", "ONNX Layout Models downloaded and verified successfully!");
            res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
@@ -684,6 +687,8 @@ except Exception as e:
      });
      
      hfProc.on("error", (err) => {
+        if (hfResolved) return;
+        hfResolved = true;
         sendLog("warning", `Failed to spawn python for download: ${err.message}. Models might download at runtime.`);
         res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with warnings." })}\n\n`);
@@ -694,19 +699,28 @@ except Exception as e:
   if (forceReinstall) {
     sendLog("info", "Force reinstall requested. Cleaning up existing virtual environment...");
     if (fs.existsSync(venvDir)) {
-       fs.rmSync(venvDir, { recursive: true, force: true });
+       try {
+          fs.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+       } catch (err) {
+          sendLog("warning", `Could not completely remove existing venvDir (${err.message}). Proceeding anyway.`);
+       }
     }
     createVenvAndInstall();
   } else {
     // Step 1: Check if local venv pdf2zh already exists
     const testProc = spawn(pdf2zhCmdLocal, ["--version"]);
+    let testResolved = false;
     
     testProc.on("error", () => {
+      if (testResolved) return;
+      testResolved = true;
       sendLog("warning", "Local virtual environment pdf2zh not found. Proceeding with isolated installation...");
       createVenvAndInstall();
     });
 
     testProc.on("close", (code) => {
+      if (testResolved) return;
+      testResolved = true;
       if (code === 0) {
         sendLog("success", "pdf2zh is already installed in the isolated virtual environment and is working correctly!");
         res.write(`data: ${JSON.stringify({ type: "progress", value: 80 })}\n\n`);
@@ -714,8 +728,12 @@ except Exception as e:
       } else {
         sendLog("warning", "Existing pdf2zh installation appears broken. Re-installing...");
         if (fs.existsSync(venvDir)) {
-           fs.rmSync(venvDir, { recursive: true, force: true });
-        }
+       try {
+          fs.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+       } catch (err) {
+          sendLog("warning", `Could not completely remove existing venvDir (${err.message}). Proceeding anyway.`);
+       }
+    }
         createVenvAndInstall();
       }
     });
@@ -725,11 +743,14 @@ except Exception as e:
     sendLog("info", `Creating self-contained python virtual environment at: ${venvDir}`);
     res.write(`data: ${JSON.stringify({ type: "progress", value: 10 })}\n\n`);
     const venvProc = spawn(pythonCmd, ["-m", "venv", venvDir]);
+    let venvResolved = false;
     
     venvProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
     venvProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
     
     venvProc.on("close", (code) => {
+       if (venvResolved) return;
+       venvResolved = true;
        if (code !== 0) {
           sendLog("error", `Failed to create virtual environment (code ${code}). Please ensure python3-venv is installed.`);
           res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
@@ -743,14 +764,19 @@ except Exception as e:
        const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
        // Upgrade pip, setuptools, and wheel before installing anything to prevent Wheel build errors during dependencies resolution
        const pipUpgradeProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
+       let pipUpgradeResolved = false;
        
        pipUpgradeProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
        pipUpgradeProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
        pipUpgradeProc.on("error", (err) => {
+           if (pipUpgradeResolved) return;
+           pipUpgradeResolved = true;
            sendLog("warning", `Failed to span pip upgrade command: ${err.message}. It will try proceeding with default pip version.`);
        });
 
        pipUpgradeProc.on("close", (upgradeCode) => {
+         if (pipUpgradeResolved) return;
+         pipUpgradeResolved = true;
          if (upgradeCode !== 0) {
             sendLog("warning", "Pip/setuptools upgrade failed, proceeding with default pip version. (If build fails later, this might be why).");
          } else {
@@ -761,7 +787,8 @@ except Exception as e:
          sendLog("info", `Executing: ${venvPythonCmd} -m pip install pdf2zh (this may take a few minutes)`);
          
          // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
-         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "pdf2zh"]);
+         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pdf2zh"]);
+         let pipResolved = false;
          
          let currentProgress = 30;
          
@@ -779,6 +806,8 @@ except Exception as e:
          });
          
          pipProc.on("close", (pipCode) => {
+           if (pipResolved) return;
+           pipResolved = true;
            if (pipCode === 0) {
              sendLog("success", "pdf2zh successfully installed in isolated environment!");
              downloadModel();
@@ -791,6 +820,8 @@ except Exception as e:
          });
 
          pipProc.on("error", (err) => {
+             if (pipResolved) return;
+             pipResolved = true;
              sendLog("error", `Failed to span pip command: ${err.message}.`);
              res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
              res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
@@ -800,6 +831,8 @@ except Exception as e:
     });
     
     venvProc.on("error", (err) => {
+       if (venvResolved) return;
+       venvResolved = true;
        sendLog("error", `Failed to execute python venv: ${err.message}`);
        res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup failed." })}\n\n`);
@@ -822,7 +855,7 @@ app.post("/api/pdf2zh-uninstall", async (req, res) => {
   sendLog("info", `Deleting self-contained workspace directory: ${pdf2zhDataDir}`);
 
   // Delete the data dir completely
-  fs.rm(pdf2zhDataDir, { recursive: true, force: true }, (err) => {
+  fs.rm(pdf2zhDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }, (err) => {
      if (err) {
        sendLog("error", `Failed to remove directory: ${err.message}`);
        res.write(`data: ${JSON.stringify({ type: "done", message: "Uninstall completed with errors." })}\n\n`);
@@ -957,6 +990,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   sendLog("info", "Working directory: " + pdf2zhDataDir);
 
   const proc = spawn(commandToRun, args, { cwd: pdf2zhDataDir, env: envVars });
+  let transResolved = false;
 
   proc.stdout.on("data", (data) => {
     sendLog("stdout", data.toString());
@@ -967,12 +1001,16 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   });
 
   proc.on("error", (err) => {
+      if (transResolved) return;
+      transResolved = true;
     sendLog("error", `Failed to spawn pdf2zh check your setup: ${err.message}`);
     res.write(`data: ${JSON.stringify({ type: "done", error: err.message })}\n\n`);
     res.end();
   });
 
   proc.on("close", (code) => {
+      if (transResolved) return;
+      transResolved = true;
     if (code !== 0) {
       sendLog("error", `pdf2zh execution exited with error code ${code}`);
       res.write(`data: ${JSON.stringify({ type: "done", error: "Translation process failed" })}\n\n`);

@@ -685,8 +685,12 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         sendLog("info", "Pre-downloading required ONNX layout models from HF Hub...");
         res.write("data: ".concat(JSON.stringify({ type: "progress", value: 90 }), "\n\n"));
         var venvPythonCmd = isWin ? path_1.default.join(venvDir, "Scripts", "python.exe") : path_1.default.join(venvDir, "bin", "python3");
-        var hfProc = (0, child_process_1.spawn)(venvPythonCmd, ["-m", "huggingface_hub.cli", "download", "wybxc/DocLayout-YOLO-DocStructBench-onnx", "doclayout_yolo_docstructbench_imgsz1024.onnx"], {
-            env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy" })
+        // Instead of just calling huggingface_hub.cli directly which might be problematic, 
+        // we run pdf2zh with a dummy command or trigger its model download, 
+        // or we just use python to robustly download.
+        var pythonCode = "\nimport os\nimport sys\ntry:\n    from huggingface_hub import hf_hub_download\n    print(\"Downloading ONNX layout model...\")\n    hf_hub_download(repo_id=\"wybxc/DocLayout-YOLO-DocStructBench-onnx\", filename=\"doclayout_yolo_docstructbench_imgsz1024.onnx\")\n    print(\"Download completed successfully!\")\nexcept Exception as e:\n    print(f\"Error downloading model: {e}\", file=sys.stderr)\n    sys.exit(1)\n";
+        var hfProc = (0, child_process_1.spawn)(venvPythonCmd, ["-c", pythonCode], {
+            env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" })
         });
         hfProc.stdout.on("data", function (data) { return sendLog("stdout", data.toString().trim()); });
         hfProc.stderr.on("data", function (data) {
@@ -705,7 +709,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         });
         hfProc.on("close", function (code) {
             if (code === 0) {
-                sendLog("success", "ONNX Layout Models downloaded successfully!");
+                sendLog("success", "ONNX Layout Models downloaded and verified successfully!");
                 res.write("data: ".concat(JSON.stringify({ type: "progress", value: 100 }), "\n\n"));
                 res.write("data: ".concat(JSON.stringify({ type: "done", message: "Setup completed successfully." }), "\n\n"));
             }
@@ -717,7 +721,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
             res.end();
         });
         hfProc.on("error", function (err) {
-            sendLog("warning", "Failed to span huggingface-cli: ".concat(err.message, ". Models will download at runtime."));
+            sendLog("warning", "Failed to spawn python for download: ".concat(err.message, ". Models might download at runtime."));
             res.write("data: ".concat(JSON.stringify({ type: "progress", value: 100 }), "\n\n"));
             res.write("data: ".concat(JSON.stringify({ type: "done", message: "Setup completed with warnings." }), "\n\n"));
             res.end();
@@ -756,7 +760,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                 res.write("data: ".concat(JSON.stringify({ type: "progress", value: 30 }), "\n\n"));
                 sendLog("info", "Executing: ".concat(venvPythonCmd, " -m pip install pdf2zh (this may take a few minutes)"));
                 // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
-                var pipProc = (0, child_process_1.spawn)(venvPythonCmd, ["-m", "pip", "install", "pdf2zh"]);
+                var pipProc = (0, child_process_1.spawn)(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pdf2zh"]);
                 var currentProgress = 30;
                 pipProc.stdout.on("data", function (data) {
                     var out = data.toString();
@@ -820,7 +824,12 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         if (forceReinstall) {
             sendLog("info", "Force reinstall requested. Cleaning up existing virtual environment...");
             if (fs_1.default.existsSync(venvDir)) {
-                fs_1.default.rmSync(venvDir, { recursive: true, force: true });
+                try {
+                    fs_1.default.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+                }
+                catch (err) {
+                    sendLog("warning", "Could not completely remove existing venvDir (".concat(err.message, "). Proceeding anyway."));
+                }
             }
             createVenvAndInstall();
         }
@@ -839,7 +848,12 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                 else {
                     sendLog("warning", "Existing pdf2zh installation appears broken. Re-installing...");
                     if (fs_1.default.existsSync(venvDir)) {
-                        fs_1.default.rmSync(venvDir, { recursive: true, force: true });
+                        try {
+                            fs_1.default.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+                        }
+                        catch (err) {
+                            sendLog("warning", "Could not completely remove existing venvDir (".concat(err.message, "). Proceeding anyway."));
+                        }
                     }
                     createVenvAndInstall();
                 }
@@ -861,7 +875,7 @@ app.post("/api/pdf2zh-uninstall", function (req, res) { return __awaiter(void 0,
         sendLog("info", "Starting native pdf2zh cleanup and workspace removal...");
         sendLog("info", "Deleting self-contained workspace directory: ".concat(pdf2zhDataDir));
         // Delete the data dir completely
-        fs_1.default.rm(pdf2zhDataDir, { recursive: true, force: true }, function (err) {
+        fs_1.default.rm(pdf2zhDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }, function (err) {
             if (err) {
                 sendLog("error", "Failed to remove directory: ".concat(err.message));
                 res.write("data: ".concat(JSON.stringify({ type: "done", message: "Uninstall completed with errors." }), "\n\n"));
