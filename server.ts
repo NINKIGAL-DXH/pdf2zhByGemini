@@ -630,6 +630,48 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
 
   const forceReinstall = req.query.forceReinstall === 'true';
 
+  function downloadModel() {
+     sendLog("info", "Pre-downloading required ONNX layout models from HF Hub...");
+     res.write(`data: ${JSON.stringify({ type: "progress", value: 90 })}\n\n`);
+     const hfCliCmd = isWin ? path.join(venvDir, "Scripts", "huggingface-cli.exe") : path.join(venvDir, "bin", "huggingface-cli");
+     const hfProc = spawn(hfCliCmd, ["download", "wybxc/DocLayout-YOLO-DocStructBench-onnx", "doclayout_yolo_docstructbench_imgsz1024.onnx"], {
+        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy" }
+     });
+     
+     hfProc.stdout.on("data", (data) => sendLog("stdout", data.toString().trim()));
+     hfProc.stderr.on("data", (data) => {
+        const text = data.toString();
+        const textLines = text.split(/[\r\n]+/);
+        for (const line of textLines) {
+           if (!line.trim()) continue;
+           const match = line.match(/(\d+)%.*?\[.*?<\s*([^,]+),\s*([^\]]+)\]/);
+           if (match) {
+              res.write(`data: ${JSON.stringify({ type: "model_progress", percentage: parseInt(match[1], 10), eta: match[2].trim(), speed: match[3].trim() })}\n\n`);
+           }
+           sendLog("stderr", line.trim());
+        }
+     });
+     hfProc.on("close", (code) => {
+        if (code === 0) {
+           sendLog("success", "ONNX Layout Models downloaded successfully!");
+           res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+           res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
+        } else {
+           sendLog("warning", `ONNX Layout Model download failed with code ${code}. Translation might retry downloading it at runtime.`);
+           res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+           res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with warnings." })}\n\n`);
+        }
+        res.end();
+     });
+     
+     hfProc.on("error", (err) => {
+        sendLog("warning", `Failed to span huggingface-cli: ${err.message}. Models will download at runtime.`);
+        res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with warnings." })}\n\n`);
+        res.end();
+     });
+  }
+
   if (forceReinstall) {
     sendLog("info", "Force reinstall requested. Cleaning up existing virtual environment...");
     if (fs.existsSync(venvDir)) {
@@ -648,9 +690,8 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
     testProc.on("close", (code) => {
       if (code === 0) {
         sendLog("success", "pdf2zh is already installed in the isolated virtual environment and is working correctly!");
-        res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
-        res.end();
+        res.write(`data: ${JSON.stringify({ type: "progress", value: 80 })}\n\n`);
+        downloadModel();
       } else {
         sendLog("warning", "Existing pdf2zh installation appears broken. Re-installing...");
         if (fs.existsSync(venvDir)) {
@@ -701,13 +742,13 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
        pipProc.on("close", (pipCode) => {
          if (pipCode === 0) {
            sendLog("success", "pdf2zh successfully installed in isolated environment!");
-           res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+           downloadModel();
          } else {
            sendLog("error", `pip install failed with code ${pipCode}. Check your python/pip setup.`);
            res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+           res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
+           res.end();
          }
-         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed." })}\n\n`);
-         res.end();
        });
        
        pipProc.on("error", (err) => {
@@ -753,10 +794,11 @@ app.post("/api/pdf2zh-uninstall", async (req, res) => {
   });
 });
 
+
 // API to proxy huggingface downloads (bypasses python SSL/TLS limitations on older macs)
 app.use("/hf-proxy", (req, res) => {
   // Extract target URL from query parameter if provided (for redirects), else build from req.url
-  let targetUrlStr = req.query.url as string;
+  let targetUrlStr = req.query.url;
   if (!targetUrlStr) {
      // Remove query params related to hfproxy if any, usually it's just the path
      targetUrlStr = "https://hf-mirror.com" + req.url;
@@ -774,7 +816,7 @@ app.use("/hf-proxy", (req, res) => {
     }
   };
 
-  const proxyReq = proxyModule.request(targetUrl, options, (proxyRes: any) => {
+  const proxyReq = proxyModule.request(targetUrl, options, (proxyRes) => {
     // Intercept redirects and rewrite the Location header so python uses HTTP
     let statusCode = proxyRes.statusCode || 200;
     
@@ -793,7 +835,7 @@ app.use("/hf-proxy", (req, res) => {
 
     res.status(statusCode);
     Object.keys(proxyRes.headers).forEach((key) => {
-      res.setHeader(key, proxyRes.headers[key] as string);
+      res.setHeader(key, proxyRes.headers[key]);
     });
 
     if (req.method === "HEAD") {
@@ -804,7 +846,7 @@ app.use("/hf-proxy", (req, res) => {
     proxyRes.pipe(res, { end: true });
   });
 
-  proxyReq.on("error", (err: any) => {
+  proxyReq.on("error", (err) => {
     console.error("[HF Proxy Error]", err.message);
     res.status(500).end();
   });
