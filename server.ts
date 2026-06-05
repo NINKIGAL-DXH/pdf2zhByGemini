@@ -991,6 +991,8 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   }
   if (apiKey) {
      envVars.OPENAI_API_KEY = apiKey;
+  } else {
+     envVars.OPENAI_API_KEY = "sk-dummy";
   }
   if (provider === "gemini" && process.env.GEMINI_API_KEY) {
      envVars.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
