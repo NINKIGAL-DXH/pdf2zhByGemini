@@ -1067,8 +1067,14 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const host = process.env.HOST || "0.0.0.0";
+  const server = app.listen(PORT, host, () => {
+    const address = server.address();
+    const actualPort = typeof address === 'string' ? PORT : address?.port;
+    if (typeof global !== 'undefined') {
+       (global as any).APP_PORT = actualPort;
+    }
+    console.log(`Server running on http://${host}:${actualPort}`);
   });
 
   server.on("error", (error: any) => {
@@ -1076,4 +1082,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server asynchronously:", err);
+  process.exit(1);
+});

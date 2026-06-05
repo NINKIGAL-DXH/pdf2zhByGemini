@@ -3,7 +3,8 @@ const path = require('path');
 
 // Set production environment variables
 process.env.NODE_ENV = 'production';
-process.env.PORT = '13028'; // Use a distinct port for desktop client to avoid conflicts with 3000
+process.env.PORT = '0'; // Use 0 to let OS assign a random free port
+process.env.HOST = '127.0.0.1'; // Bind strictly to localhost // Use a distinct port for desktop client to avoid conflicts with 3000
 
 let mainWindow;
 
@@ -48,17 +49,19 @@ function createWindow() {
     );
   }
 
-  // Load the web app which is hosted by the Express server on port 13028
+  // Load the web app which is hosted by the Express server on port " + actualPort + "
   // Give Express a split second to boot
   setTimeout(() => {
-    mainWindow.loadURL('http://127.0.0.1:13028').catch((err) => {
+    let actualPort = global.APP_PORT || 13028;
+    mainWindow.loadURL('http://127.0.0.1:' + actualPort).catch((err) => {
       console.warn("Retrying link connection (attempt 2)...", err);
       setTimeout(() => {
-        mainWindow.loadURL('http://127.0.0.1:13028').catch((e) => {
+        actualPort = global.APP_PORT || 13028; // Re-evaluate in case server took longer than 1s to set it
+        mainWindow.loadURL('http://127.0.0.1:' + actualPort).catch((e) => {
           console.error("Local web server failed to respond:", e);
           dialog.showErrorBox(
             "Connection Port Error",
-            "The desktop interface could not connect to the local translation service on port 13028.\n\n" +
+            "The desktop interface could not connect to the local translation service on port " + actualPort + ".\n\n" +
             "Please confirm no other application is using this port, or retry launching the application.\n\nError details: " + e.message
           );
         });

@@ -689,6 +689,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         // we run pdf2zh with a dummy command or trigger its model download, 
         // or we just use python to robustly download.
         var pythonCode = "\nimport os\nimport sys\ntry:\n    from huggingface_hub import hf_hub_download\n    print(\"Downloading ONNX layout model...\")\n    hf_hub_download(repo_id=\"wybxc/DocLayout-YOLO-DocStructBench-onnx\", filename=\"doclayout_yolo_docstructbench_imgsz1024.onnx\")\n    print(\"Download completed successfully!\")\nexcept Exception as e:\n    print(f\"Error downloading model: {e}\", file=sys.stderr)\n    sys.exit(1)\n";
+        var hfResolved = false;
         var hfProc = (0, child_process_1.spawn)(venvPythonCmd, ["-c", pythonCode], {
             env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" })
         });
@@ -708,6 +709,9 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
             }
         });
         hfProc.on("close", function (code) {
+            if (hfResolved)
+                return;
+            hfResolved = true;
             if (code === 0) {
                 sendLog("success", "ONNX Layout Models downloaded and verified successfully!");
                 res.write("data: ".concat(JSON.stringify({ type: "progress", value: 100 }), "\n\n"));
@@ -721,6 +725,9 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
             res.end();
         });
         hfProc.on("error", function (err) {
+            if (hfResolved)
+                return;
+            hfResolved = true;
             sendLog("warning", "Failed to spawn python for download: ".concat(err.message, ". Models might download at runtime."));
             res.write("data: ".concat(JSON.stringify({ type: "progress", value: 100 }), "\n\n"));
             res.write("data: ".concat(JSON.stringify({ type: "done", message: "Setup completed with warnings." }), "\n\n"));
@@ -731,9 +738,13 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         sendLog("info", "Creating self-contained python virtual environment at: ".concat(venvDir));
         res.write("data: ".concat(JSON.stringify({ type: "progress", value: 10 }), "\n\n"));
         var venvProc = (0, child_process_1.spawn)(pythonCmd, ["-m", "venv", venvDir]);
+        var venvResolved = false;
         venvProc.stdout.on("data", function (data) { return sendLog("stdout", data.toString()); });
         venvProc.stderr.on("data", function (data) { return sendLog("stderr", data.toString()); });
         venvProc.on("close", function (code) {
+            if (venvResolved)
+                return;
+            venvResolved = true;
             if (code !== 0) {
                 sendLog("error", "Failed to create virtual environment (code ".concat(code, "). Please ensure python3-venv is installed."));
                 res.write("data: ".concat(JSON.stringify({ type: "progress", value: 0 }), "\n\n"));
@@ -745,12 +756,19 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
             var venvPythonCmd = isWin ? path_1.default.join(venvDir, "Scripts", "python.exe") : path_1.default.join(venvDir, "bin", "python3");
             // Upgrade pip, setuptools, and wheel before installing anything to prevent Wheel build errors during dependencies resolution
             var pipUpgradeProc = (0, child_process_1.spawn)(venvPythonCmd, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
+            var pipUpgradeResolved = false;
             pipUpgradeProc.stdout.on("data", function (data) { return sendLog("stdout", data.toString()); });
             pipUpgradeProc.stderr.on("data", function (data) { return sendLog("stderr", data.toString()); });
             pipUpgradeProc.on("error", function (err) {
+                if (pipUpgradeResolved)
+                    return;
+                pipUpgradeResolved = true;
                 sendLog("warning", "Failed to span pip upgrade command: ".concat(err.message, ". It will try proceeding with default pip version."));
             });
             pipUpgradeProc.on("close", function (upgradeCode) {
+                if (pipUpgradeResolved)
+                    return;
+                pipUpgradeResolved = true;
                 if (upgradeCode !== 0) {
                     sendLog("warning", "Pip/setuptools upgrade failed, proceeding with default pip version. (If build fails later, this might be why).");
                 }
@@ -761,6 +779,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                 sendLog("info", "Executing: ".concat(venvPythonCmd, " -m pip install pdf2zh (this may take a few minutes)"));
                 // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
                 var pipProc = (0, child_process_1.spawn)(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pdf2zh"]);
+                var pipResolved = false;
                 var currentProgress = 30;
                 pipProc.stdout.on("data", function (data) {
                     var out = data.toString();
@@ -774,6 +793,9 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                     sendLog("stderr", data.toString());
                 });
                 pipProc.on("close", function (pipCode) {
+                    if (pipResolved)
+                        return;
+                    pipResolved = true;
                     if (pipCode === 0) {
                         sendLog("success", "pdf2zh successfully installed in isolated environment!");
                         downloadModel();
@@ -786,6 +808,9 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
                     }
                 });
                 pipProc.on("error", function (err) {
+                    if (pipResolved)
+                        return;
+                    pipResolved = true;
                     sendLog("error", "Failed to span pip command: ".concat(err.message, "."));
                     res.write("data: ".concat(JSON.stringify({ type: "progress", value: 0 }), "\n\n"));
                     res.write("data: ".concat(JSON.stringify({ type: "done", message: "Setup completed with errors." }), "\n\n"));
@@ -794,13 +819,16 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
             });
         });
         venvProc.on("error", function (err) {
+            if (venvResolved)
+                return;
+            venvResolved = true;
             sendLog("error", "Failed to execute python venv: ".concat(err.message));
             res.write("data: ".concat(JSON.stringify({ type: "progress", value: 0 }), "\n\n"));
             res.write("data: ".concat(JSON.stringify({ type: "done", message: "Setup failed." }), "\n\n"));
             res.end();
         });
     }
-    var sendLog, configPath, venvDir, isWin, pythonCmd, pipCmd, pdf2zhCmdLocal, forceReinstall, testProc;
+    var sendLog, configPath, venvDir, isWin, pythonCmd, pipCmd, pdf2zhCmdLocal, forceReinstall, testProc, testResolved_1;
     return __generator(this, function (_a) {
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache");
@@ -835,11 +863,18 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         }
         else {
             testProc = (0, child_process_1.spawn)(pdf2zhCmdLocal, ["--version"]);
+            testResolved_1 = false;
             testProc.on("error", function () {
+                if (testResolved_1)
+                    return;
+                testResolved_1 = true;
                 sendLog("warning", "Local virtual environment pdf2zh not found. Proceeding with isolated installation...");
                 createVenvAndInstall();
             });
             testProc.on("close", function (code) {
+                if (testResolved_1)
+                    return;
+                testResolved_1 = true;
                 if (code === 0) {
                     sendLog("success", "pdf2zh is already installed in the isolated virtual environment and is working correctly!");
                     res.write("data: ".concat(JSON.stringify({ type: "progress", value: 80 }), "\n\n"));
@@ -935,7 +970,7 @@ app.use("/hf-proxy", function (req, res) {
 });
 // API to run actual PDFMathTranslate/pdf2zh Python script
 app.post("/api/pdf2zh-translate", upload.single("file"), function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var _a, sourceLang, targetLang, provider, model, endpoint, apiKey, threads, filePath, fileName, sendLog, args, envVars, venvDir, isWin, pdf2zhCmdLocal, commandToRun, proc;
+    var _a, sourceLang, targetLang, provider, model, endpoint, apiKey, threads, filePath, fileName, sendLog, args, envVars, venvDir, isWin, pdf2zhCmdLocal, commandToRun, proc, transResolved;
     return __generator(this, function (_b) {
         if (!req.file) {
             return [2 /*return*/, res.status(400).json({ error: "No PDF file uploaded" })];
@@ -997,6 +1032,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), function (req, res) { r
         sendLog("info", "Executing command: ".concat(commandToRun, " ").concat(args.join(" ")));
         sendLog("info", "Working directory: " + pdf2zhDataDir);
         proc = (0, child_process_1.spawn)(commandToRun, args, { cwd: pdf2zhDataDir, env: envVars });
+        transResolved = false;
         proc.stdout.on("data", function (data) {
             sendLog("stdout", data.toString());
         });
@@ -1004,11 +1040,17 @@ app.post("/api/pdf2zh-translate", upload.single("file"), function (req, res) { r
             sendLog("stderr", data.toString());
         });
         proc.on("error", function (err) {
+            if (transResolved)
+                return;
+            transResolved = true;
             sendLog("error", "Failed to spawn pdf2zh check your setup: ".concat(err.message));
             res.write("data: ".concat(JSON.stringify({ type: "done", error: err.message }), "\n\n"));
             res.end();
         });
         proc.on("close", function (code) {
+            if (transResolved)
+                return;
+            transResolved = true;
             if (code !== 0) {
                 sendLog("error", "pdf2zh execution exited with error code ".concat(code));
                 res.write("data: ".concat(JSON.stringify({ type: "done", error: "Translation process failed" }), "\n\n"));
@@ -1051,7 +1093,7 @@ app.get("/api/pdf2zh-download/:filename", function (req, res) {
 // Serve frontend assets via Vite in development, or standard express static in production
 function startServer() {
     return __awaiter(this, void 0, void 0, function () {
-        var createViteServer, vite, distPath_1, server;
+        var createViteServer, vite, distPath_1, host, server;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
@@ -1075,8 +1117,14 @@ function startServer() {
                     });
                     _a.label = 4;
                 case 4:
-                    server = app.listen(PORT, "0.0.0.0", function () {
-                        console.log("Server running on http://localhost:".concat(PORT));
+                    host = process.env.HOST || "0.0.0.0";
+                    server = app.listen(PORT, host, function () {
+                        var address = server.address();
+                        var actualPort = typeof address === 'string' ? PORT : address === null || address === void 0 ? void 0 : address.port;
+                        if (typeof global !== 'undefined') {
+                            global.APP_PORT = actualPort;
+                        }
+                        console.log("Server running on http://".concat(host, ":").concat(actualPort));
                     });
                     server.on("error", function (error) {
                         console.error("Express server error:", error);
@@ -1086,4 +1134,7 @@ function startServer() {
         });
     });
 }
-startServer();
+startServer().catch(function (err) {
+    console.error("Failed to start server asynchronously:", err);
+    process.exit(1);
+});
