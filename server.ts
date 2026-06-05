@@ -672,7 +672,7 @@ except Exception as e:
      
      let hfResolved = false;
      const hfProc = spawn(venvPythonCmd, ["-c", pythonCode], {
-        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" }
+        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:" + ((global as any).APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" }
      });
      
      hfProc.stdout.on("data", (data) => sendLog("stdout", data.toString().trim()));
@@ -920,7 +920,7 @@ app.use("/hf-proxy", (req, res) => {
       }
       
       // Rewrite the location to go through our proxy again
-      proxyRes.headers.location = `http://127.0.0.1:3000/hf-proxy?url=${encodeURIComponent(absoluteLocation)}`;
+      proxyRes.headers.location = `http://127.0.0.1:${(global as any).APP_PORT || 3000}/hf-proxy?url=${encodeURIComponent(absoluteLocation)}`;
     }
 
     res.status(statusCode);
@@ -982,7 +982,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      }
   }
   
-  const envVars: any = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" };
+  const envVars: any = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:" + ((global as any).APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" };
   if (model) {
      envVars.OPENAI_MODEL = model;
   }
@@ -1014,7 +1014,21 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   });
 
   proc.stderr.on("data", (data) => {
-    sendLog("stderr", data.toString());
+    const text = data.toString();
+    const lines = text.split(/[\r\n]+/);
+    for (const line of lines) {
+       if (!line.trim()) continue;
+       const matchModel = line.match(/(\d+)%\|.*?\|.*?\s+\[(?:.*?(?:<\s*([^,]+))?|.*?),\s*([^\]]+)\]/);
+       if (matchModel) {
+          res.write(`data: ${JSON.stringify({ type: "model_progress", percentage: parseInt(matchModel[1], 10), eta: (matchModel[2] || "00:00").trim(), speed: (matchModel[3] || "N/A").trim() })}\n\n`);
+       } else {
+          const transMatch = line.match(/(?:\s|^)(\d+)%\|.*?\|/);
+          if (transMatch) {
+              res.write(`data: ${JSON.stringify({ type: "translation_progress", percentage: parseInt(transMatch[1], 10) })}\n\n`);
+          }
+       }
+       sendLog("stderr", line.trim());
+    }
   });
 
   proc.on("error", (err) => {

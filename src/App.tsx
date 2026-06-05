@@ -578,6 +578,7 @@ export default function App() {
     setActiveTab("translate");
     setTranslationWarning(null);
     setTranslationError(null);
+    setModelDownloadProgress(null);
 
     let currentLogs: string[] = [];
     const pushLog = (txt: string) => {
@@ -638,7 +639,11 @@ export default function App() {
                     const payload = JSON.parse(line.replace("data: ", ""));
                     if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
                        pushLog(`[pdf2zh] ${payload.message}`);
-                    } else if (payload.type === "stderr" || payload.type === "warning") {
+                    } else if (payload.type === "translation_progress") {
+     setTranslationProgress(payload.percentage);
+  } else if (payload.type === "model_progress") {
+     setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
+  } else if (payload.type === "stderr" || payload.type === "warning") {
                        pushLog(`[WARNING] ${payload.message}`);
                     } else if (payload.type === "error") {
                        pushLog(`[FAILED] ${payload.message || payload.error}`);
@@ -2173,7 +2178,11 @@ FLAGS EXPLAINED:
                                               const payload = JSON.parse(line.replace("data: ", ""));
                                               if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
                                                  pushLog(`[Cleanup] ${payload.message}`);
-                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                              } else if (payload.type === "translation_progress") {
+     setTranslationProgress(payload.percentage);
+  } else if (payload.type === "model_progress") {
+     setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
+  } else if (payload.type === "stderr" || payload.type === "warning") {
                                                  pushLog(`[WARNING] ${payload.message}`);
                                               } else if (payload.type === "error") {
                                                  pushLog(`[FAILED] ${payload.message || payload.error}`);
@@ -2237,7 +2246,11 @@ FLAGS EXPLAINED:
                                                   setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
                                                } else if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
                                                  pushLog(`[Setup] ${payload.message}`);
-                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                              } else if (payload.type === "translation_progress") {
+     setTranslationProgress(payload.percentage);
+  } else if (payload.type === "model_progress") {
+     setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
+  } else if (payload.type === "stderr" || payload.type === "warning") {
                                                  pushLog(`[WARNING] ${payload.message}`);
                                               } else if (payload.type === "error") {
                                                  pushLog(`[FAILED] ${payload.message || payload.error}`);
@@ -2302,7 +2315,11 @@ FLAGS EXPLAINED:
                                                   setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
                                                } else if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
                                                  pushLog(`[Setup] ${payload.message}`);
-                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                              } else if (payload.type === "translation_progress") {
+     setTranslationProgress(payload.percentage);
+  } else if (payload.type === "model_progress") {
+     setModelDownloadProgress({ percentage: payload.percentage, eta: payload.eta, speed: payload.speed });
+  } else if (payload.type === "stderr" || payload.type === "warning") {
                                                  pushLog(`[WARNING] ${payload.message}`);
                                               } else if (payload.type === "error") {
                                                  pushLog(`[FAILED] ${payload.message || payload.error}`);

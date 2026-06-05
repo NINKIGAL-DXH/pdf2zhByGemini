@@ -691,7 +691,7 @@ app.post("/api/pdf2zh-setup", function (req, res) { return __awaiter(void 0, voi
         var pythonCode = "\nimport os\nimport sys\nimport time\n\ntry:\n    from huggingface_hub import hf_hub_download\n    print(\"Downloading ONNX layout model...\")\n    max_retries = 100\n    for attempt in range(max_retries):\n        try:\n            hf_hub_download(\n                repo_id=\"wybxc/DocLayout-YOLO-DocStructBench-onnx\", \n                filename=\"doclayout_yolo_docstructbench_imgsz1024.onnx\",\n                resume_download=True\n            )\n            print(\"Download completed successfully!\")\n            sys.exit(0)\n        except Exception as e:\n            print(f\"Attempt {attempt + 1} failed: {e}\", file=sys.stderr)\n            if attempt < max_retries - 1:\n                print(\"Network disconnected or error. Retrying in 5 seconds to resume download...\", file=sys.stderr)\n                time.sleep(5)\n            else:\n                sys.exit(1)\nexcept Exception as e:\n    print(f\"Error downloading model: {e}\", file=sys.stderr)\n    sys.exit(1)\n";
         var hfResolved = false;
         var hfProc = (0, child_process_1.spawn)(venvPythonCmd, ["-c", pythonCode], {
-            env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" })
+            env: __assign(__assign({}, process.env), { HF_ENDPOINT: "http://127.0.0.1:" + (global.APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" })
         });
         hfProc.stdout.on("data", function (data) { return sendLog("stdout", data.toString().trim()); });
         hfProc.stderr.on("data", function (data) {
@@ -950,7 +950,7 @@ app.use("/hf-proxy", function (req, res) {
                 absoluteLocation = new URL(originalLocation, targetUrl.origin).toString();
             }
             // Rewrite the location to go through our proxy again
-            proxyRes.headers.location = "http://127.0.0.1:3000/hf-proxy?url=".concat(encodeURIComponent(absoluteLocation));
+            proxyRes.headers.location = "http://127.0.0.1:".concat(global.APP_PORT || 3000, "/hf-proxy?url=").concat(encodeURIComponent(absoluteLocation));
         }
         res.status(statusCode);
         Object.keys(proxyRes.headers).forEach(function (key) {
@@ -1012,7 +1012,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), function (req, res) { r
                 args.push("openai"); // pdf2zh uses openai compatible format
             }
         }
-        envVars = __assign(__assign({}, process.env), { PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" });
+        envVars = __assign(__assign({}, process.env), { PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:" + (global.APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" });
         if (model) {
             envVars.OPENAI_MODEL = model;
         }
@@ -1037,7 +1037,24 @@ app.post("/api/pdf2zh-translate", upload.single("file"), function (req, res) { r
             sendLog("stdout", data.toString());
         });
         proc.stderr.on("data", function (data) {
-            sendLog("stderr", data.toString());
+            var text = data.toString();
+            var lines = text.split(/[\r\n]+/);
+            for (var _i = 0, lines_1 = lines; _i < lines_1.length; _i++) {
+                var line = lines_1[_i];
+                if (!line.trim())
+                    continue;
+                var matchModel = line.match(/(\d+)%\|.*?\|.*?\s+\[(?:.*?(?:<\s*([^,]+))?|.*?),\s*([^\]]+)\]/);
+                if (matchModel) {
+                    res.write("data: ".concat(JSON.stringify({ type: "model_progress", percentage: parseInt(matchModel[1], 10), eta: (matchModel[2] || "00:00").trim(), speed: (matchModel[3] || "N/A").trim() }), "\n\n"));
+                }
+                else {
+                    var transMatch = line.match(/(?:\s|^)(\d+)%\|.*?\|/);
+                    if (transMatch) {
+                        res.write("data: ".concat(JSON.stringify({ type: "translation_progress", percentage: parseInt(transMatch[1], 10) }), "\n\n"));
+                    }
+                }
+                sendLog("stderr", line.trim());
+            }
         });
         proc.on("error", function (err) {
             if (transResolved)
