@@ -672,7 +672,7 @@ except Exception as e:
      
      let hfResolved = false;
      const hfProc = spawn(venvPythonCmd, ["-c", pythonCode], {
-        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:" + ((global as any).APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" }
+        env: { ...process.env, HF_ENDPOINT: "https://hf-mirror.com", HF_HUB_ENABLE_HF_TRANSFER: "0" }
      });
      
      hfProc.stdout.on("data", (data) => sendLog("stdout", data.toString().trim()));
@@ -982,7 +982,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      }
   }
   
-  const envVars: any = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:" + ((global as any).APP_PORT || 3000) + "/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" };
+  const envVars: any = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "https://hf-mirror.com", HF_HUB_ENABLE_HF_TRANSFER: "0" };
   if (model) {
      envVars.OPENAI_MODEL = model;
   }
