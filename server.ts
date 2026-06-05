@@ -628,23 +628,38 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
   const pipCmd = isWin ? path.join(venvDir, "Scripts", "pip.exe") : path.join(venvDir, "bin", "pip");
   const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
 
-  // Step 1: Check if local venv pdf2zh already exists
-  const testProc = spawn(pdf2zhCmdLocal, ["--version"]);
-  
-  testProc.on("error", () => {
-    sendLog("warning", "Local virtual environment pdf2zh not found. Proceeding with isolated installation...");
-    createVenvAndInstall();
-  });
+  const forceReinstall = req.query.forceReinstall === 'true';
 
-  testProc.on("close", (code) => {
-    if (code === 0) {
-      sendLog("success", "pdf2zh is already installed in the isolated virtual environment!");
-      res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
-      res.end();
-    } else {
-      createVenvAndInstall();
+  if (forceReinstall) {
+    sendLog("info", "Force reinstall requested. Cleaning up existing virtual environment...");
+    if (fs.existsSync(venvDir)) {
+       fs.rmSync(venvDir, { recursive: true, force: true });
     }
-  });
+    createVenvAndInstall();
+  } else {
+    // Step 1: Check if local venv pdf2zh already exists
+    const testProc = spawn(pdf2zhCmdLocal, ["--version"]);
+    
+    testProc.on("error", () => {
+      sendLog("warning", "Local virtual environment pdf2zh not found. Proceeding with isolated installation...");
+      createVenvAndInstall();
+    });
+
+    testProc.on("close", (code) => {
+      if (code === 0) {
+        sendLog("success", "pdf2zh is already installed in the isolated virtual environment and is working correctly!");
+        res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
+        res.end();
+      } else {
+        sendLog("warning", "Existing pdf2zh installation appears broken. Re-installing...");
+        if (fs.existsSync(venvDir)) {
+           fs.rmSync(venvDir, { recursive: true, force: true });
+        }
+        createVenvAndInstall();
+      }
+    });
+  }
 
   function createVenvAndInstall() {
     sendLog("info", `Creating self-contained python virtual environment at: ${venvDir}`);
@@ -776,7 +791,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      }
   }
   
-  const envVars = { ...process.env };
+  const envVars = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "https://hf-mirror.com" };
   if (model) {
      envVars.OPENAI_MODEL = model;
   }

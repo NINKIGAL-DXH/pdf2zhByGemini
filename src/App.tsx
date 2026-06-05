@@ -109,6 +109,7 @@ export default function App() {
   const [executeMode, setExecuteMode] = useState<"sandbox" | "native">("sandbox");
   const [isSettingUpNative, setIsSettingUpNative] = useState(false);
   const [setupProgressNum, setSetupProgressNum] = useState<number>(0);
+  const [setupLogs, setSetupLogs] = useState<string[]>([]);
 
   // Terminal logging & Progress state
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
@@ -1768,9 +1769,13 @@ export default function App() {
                             setTranslationWarning(null);
                             setTranslationError(null);
                           }}
-                          className="text-xs flex items-center space-x-1.5 text-slate-400 hover:text-white cursor-pointer px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded border border-white/5 transition"
+                          className={`text-xs flex items-center space-x-1.5 cursor-pointer px-3 py-1.5 rounded transition border ${
+                             (currentProgressStep === "completed" || translationError) 
+                               ? "text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border-white/5" 
+                               : "text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 border-rose-500/20"
+                          }`}
                         >
-                          Translate Another File
+                          {(currentProgressStep === "completed" || translationError) ? "Translate Another File (继续翻译)" : "Cancel Translation (强制中断)"}
                         </button>
                       </div>
                     </div>
@@ -2195,14 +2200,74 @@ FLAGS EXPLAINED:
                          <button
                            onClick={async () => {
                                setIsSettingUpNative(true);
-                               setTerminalLogs([]);
-                               setCurrentProgressStep("parsing"); // use parsing panel just to show logs
-                               setActiveTab("translate"); // jump to translate to show logs
+                               setSetupLogs([]);
                                
                                let currentLogs: string[] = [];
                                const pushLog = (txt: string) => {
                                  currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
-                                 setTerminalLogs(currentLogs);
+                                 setSetupLogs(currentLogs);
+                               };
+                               
+                               try {
+                                 setSetupProgressNum(0);
+                                 const response = await fetch("/api/pdf2zh-setup?forceReinstall=true", { method: "POST" });
+                                 if (!response.body) throw new Error("No response");
+                                 const reader = response.body.getReader();
+                                 const decoder = new TextDecoder();
+                                 let doneState = false;
+                                 let buffer = "";
+                                 while (!doneState) {
+                                    const { value, done } = await reader.read();
+                                    doneState = done;
+                                    if (value) {
+                                      buffer += decoder.decode(value, { stream: true });
+                                      let processIdx = buffer.indexOf("\n\n");
+                                      while (processIdx !== -1) {
+                                        const line = buffer.substring(0, processIdx);
+                                        buffer = buffer.substring(processIdx + 2);
+                                        processIdx = buffer.indexOf("\n\n");
+                                        
+                                         if (line.startsWith("data: ")) {
+                                            try {
+                                              const payload = JSON.parse(line.replace("data: ", ""));
+                                              if (payload.type === "progress") {
+                                                 setSetupProgressNum(payload.value);
+                                              } else if (payload.type === "stdout" || payload.type === "info" || payload.type === "success") {
+                                                 pushLog(`[Setup] ${payload.message}`);
+                                              } else if (payload.type === "stderr" || payload.type === "warning") {
+                                                 pushLog(`[WARNING] ${payload.message}`);
+                                              } else if (payload.type === "error") {
+                                                 pushLog(`[FAILED] ${payload.message || payload.error}`);
+                                              } else if (payload.type === "done") {
+                                                 pushLog(`[SUCCESS] Configuration completed! You can now toggle the Engine Switch above to Native.`);
+                                                 setExecuteMode("native");
+                                              }
+                                            } catch(e) {}
+                                         }
+                                      }
+                                    }
+                                 }
+                               } catch (err: any) {
+                                  pushLog(`[CRASH] ${err.message}`);
+                               }
+                               setIsSettingUpNative(false);
+                           }}
+                           disabled={isSettingUpNative}
+                           className="flex items-center space-x-1 px-3 py-1 bg-white/10 hover:bg-white/20 text-white disabled:opacity-50 rounded text-xs tracking-wide cursor-pointer transition border border-white/20"
+                         >
+                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                           <span>Reinstall (检查并修复)</span>
+                         </button>
+
+                         <button
+                           onClick={async () => {
+                               setIsSettingUpNative(true);
+                               setSetupLogs([]);
+                               
+                               let currentLogs: string[] = [];
+                               const pushLog = (txt: string) => {
+                                 currentLogs = [...currentLogs, `[${new Date().toLocaleTimeString()}] ${txt}`];
+                                 setSetupLogs(currentLogs);
                                };
                                
                                try {
@@ -2258,14 +2323,26 @@ FLAGS EXPLAINED:
                        </div>
                     </h3>
 
-                    {(isSettingUpNative || setupProgressNum > 0) && (
+                    {(isSettingUpNative || setupProgressNum > 0 || setupLogs.length > 0) && (
                        <div className="pt-2 pb-2">
                          <div className="flex justify-between items-center mb-1.5 border-b border-transparent">
                            <span className="text-xs font-medium text-slate-300">安装进度 (Installation Progress)</span>
                            <span className="text-xs font-mono text-blue-400">{setupProgressNum}%</span>
                          </div>
-                         <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden shadow-inner border border-white/10">
+                         <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden shadow-inner border border-white/10 mb-4">
                            <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${setupProgressNum}%` }}></div>
+                         </div>
+                         <div className="bg-black/50 border border-white/10 rounded overflow-hidden">
+                           <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 border-b border-white/5">
+                             <span className="text-[10px] text-slate-400 font-mono tracking-wider">INSTALLATION_LOGS</span>
+                           </div>
+                           <div className="h-40 overflow-y-auto p-2 font-mono text-[10px] leading-relaxed break-all flex flex-col space-y-1">
+                             {setupLogs.map((log, i) => (
+                               <div key={i} className={`${log.includes('[FAILED]') || log.includes('[CRASH]') || log.includes('[WARNING]') ? 'text-rose-400' : log.includes('[SUCCESS]') ? 'text-emerald-400' : 'text-slate-300'}`}>
+                                 {log}
+                               </div>
+                             ))}
+                           </div>
                          </div>
                        </div>
                     )}
