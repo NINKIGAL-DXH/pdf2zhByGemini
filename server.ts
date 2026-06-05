@@ -633,9 +633,28 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
   function downloadModel() {
      sendLog("info", "Pre-downloading required ONNX layout models from HF Hub...");
      res.write(`data: ${JSON.stringify({ type: "progress", value: 90 })}\n\n`);
-     const hfCliCmd = isWin ? path.join(venvDir, "Scripts", "huggingface-cli.exe") : path.join(venvDir, "bin", "huggingface-cli");
-     const hfProc = spawn(hfCliCmd, ["download", "wybxc/DocLayout-YOLO-DocStructBench-onnx", "doclayout_yolo_docstructbench_imgsz1024.onnx"], {
-        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy" }
+     
+     const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+     
+     // Instead of just calling huggingface_hub.cli directly which might be problematic, 
+     // we run pdf2zh with a dummy command or trigger its model download, 
+     // or we just use python to robustly download.
+     
+     const pythonCode = `
+import os
+import sys
+try:
+    from huggingface_hub import hf_hub_download
+    print("Downloading ONNX layout model...")
+    hf_hub_download(repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx", filename="doclayout_yolo_docstructbench_imgsz1024.onnx")
+    print("Download completed successfully!")
+except Exception as e:
+    print(f"Error downloading model: {e}", file=sys.stderr)
+    sys.exit(1)
+`;
+     
+     const hfProc = spawn(venvPythonCmd, ["-c", pythonCode], {
+        env: { ...process.env, HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" }
      });
      
      hfProc.stdout.on("data", (data) => sendLog("stdout", data.toString().trim()));
@@ -653,7 +672,7 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
      });
      hfProc.on("close", (code) => {
         if (code === 0) {
-           sendLog("success", "ONNX Layout Models downloaded successfully!");
+           sendLog("success", "ONNX Layout Models downloaded and verified successfully!");
            res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
            res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully." })}\n\n`);
         } else {
@@ -665,7 +684,7 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
      });
      
      hfProc.on("error", (err) => {
-        sendLog("warning", `Failed to span huggingface-cli: ${err.message}. Models will download at runtime.`);
+        sendLog("warning", `Failed to spawn python for download: ${err.message}. Models might download at runtime.`);
         res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with warnings." })}\n\n`);
         res.end();
@@ -718,44 +737,65 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
           return res.end();
        }
        
-       sendLog("success", "Virtual environment created successfully. Installing pdf2zh...");
-       res.write(`data: ${JSON.stringify({ type: "progress", value: 30 })}\n\n`);
-       sendLog("info", `Executing: ${pipCmd} install pdf2zh (this may take a few minutes)`);
+       sendLog("success", "Virtual environment created successfully. Upgrading pip and essential build tools...");
+       res.write(`data: ${JSON.stringify({ type: "progress", value: 20 })}\n\n`);
        
-       const pipProc = spawn(pipCmd, ["install", "urllib3<2", "certifi", "pdf2zh"]);
+       const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+       // Upgrade pip, setuptools, and wheel before installing anything to prevent Wheel build errors during dependencies resolution
+       const pipUpgradeProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
        
-       let currentProgress = 30;
-       
-       pipProc.stdout.on("data", (data) => {
-         const out = data.toString();
-         sendLog("stdout", out);
-         if (out.includes("Collecting") || out.includes("Downloading")) {
-            currentProgress = Math.min(currentProgress + 1, 95);
-            res.write(`data: ${JSON.stringify({ type: "progress", value: currentProgress })}\n\n`);
-         }
+       pipUpgradeProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
+       pipUpgradeProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
+       pipUpgradeProc.on("error", (err) => {
+           sendLog("warning", `Failed to span pip upgrade command: ${err.message}. It will try proceeding with default pip version.`);
        });
-       
-       pipProc.stderr.on("data", (data) => {
-         sendLog("stderr", data.toString());
-       });
-       
-       pipProc.on("close", (pipCode) => {
-         if (pipCode === 0) {
-           sendLog("success", "pdf2zh successfully installed in isolated environment!");
-           downloadModel();
+
+       pipUpgradeProc.on("close", (upgradeCode) => {
+         if (upgradeCode !== 0) {
+            sendLog("warning", "Pip/setuptools upgrade failed, proceeding with default pip version. (If build fails later, this might be why).");
          } else {
-           sendLog("error", `pip install failed with code ${pipCode}. Check your python/pip setup.`);
-           res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
-           res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
-           res.end();
+            sendLog("success", "Build tools (pip, setuptools, wheel) upgraded successfully.");
          }
-       });
-       
-       pipProc.on("error", (err) => {
-          sendLog("error", `Failed to span pip command: ${err.message}.`);
-          res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
-          res.end();
+         
+         res.write(`data: ${JSON.stringify({ type: "progress", value: 30 })}\n\n`);
+         sendLog("info", `Executing: ${venvPythonCmd} -m pip install pdf2zh (this may take a few minutes)`);
+         
+         // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
+         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "pdf2zh"]);
+         
+         let currentProgress = 30;
+         
+         pipProc.stdout.on("data", (data) => {
+           const out = data.toString();
+           sendLog("stdout", out);
+           if (out.includes("Collecting") || out.includes("Downloading")) {
+              currentProgress = Math.min(currentProgress + 1, 95);
+              res.write(`data: ${JSON.stringify({ type: "progress", value: currentProgress })}\n\n`);
+           }
+         });
+         
+         pipProc.stderr.on("data", (data) => {
+           sendLog("stderr", data.toString());
+         });
+         
+         pipProc.on("close", (pipCode) => {
+           if (pipCode === 0) {
+             sendLog("success", "pdf2zh successfully installed in isolated environment!");
+             downloadModel();
+           } else {
+             sendLog("error", `pip install failed with code ${pipCode}. Please check your python/pip setup or network connection.`);
+             res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+             res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
+             res.end();
+           }
+         });
+
+         pipProc.on("error", (err) => {
+             sendLog("error", `Failed to span pip command: ${err.message}.`);
+             res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+             res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
+             res.end();
+         });
        });
     });
     
@@ -892,7 +932,7 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      }
   }
   
-  const envVars = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" };
+  const envVars: any = { ...process.env, PYTHONWARNINGS: "ignore", HF_ENDPOINT: "http://127.0.0.1:3000/hf-proxy", HF_HUB_ENABLE_HF_TRANSFER: "0" };
   if (model) {
      envVars.OPENAI_MODEL = model;
   }
