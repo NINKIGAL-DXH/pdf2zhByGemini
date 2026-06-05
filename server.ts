@@ -769,14 +769,17 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   if (provider === "gemini") {
      args.push("-s"); args.push("gemini"); // Note: real pdf2zh doesn't natively support gemini without extra config maybe, but we passthrough
   } else if (provider === "openai" || provider === "lmstudio" || provider === "omlx") {
-     args.push("-s"); args.push("openai"); // pdf2zh uses openai compatible format
+     if (model) {
+        args.push("-s"); args.push(`openai:${model}`);
+     } else {
+        args.push("-s"); args.push("openai"); // pdf2zh uses openai compatible format
+     }
   }
   
-  if (model) {
-     args.push("-m"); args.push(model);
-  }
-
   const envVars = { ...process.env };
+  if (model) {
+     envVars.OPENAI_MODEL = model;
+  }
   if (endpoint) {
      envVars.OPENAI_BASE_URL = endpoint.endsWith("/chat/completions") ? endpoint.replace("/chat/completions", "") : endpoint;
   }
