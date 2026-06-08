@@ -804,7 +804,7 @@ except Exception as e:
          sendLog("info", `Executing: ${venvPythonCmd} -m pip install pdf2zh (this may take a few minutes)`);
          
          // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
-         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pdf2zh"]);
+         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pymupdf==1.24.11", "pdf2zh"]);
          let pipResolved = false;
          
          let currentProgress = 30;
@@ -998,9 +998,39 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
      envVars.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   }
 
+  
   const venvDir = path.join(pdf2zhDataDir, "venv");
   const isWin = process.platform === "win32";
   const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
+  const venvPythonCmdLocal = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+
+  // Auto-downgrade for PyMuPDF 1.25.x bug
+  if (fs.existsSync(venvPythonCmdLocal)) {
+      try {
+         const pyCheck = `import sys
+try:
+    import builtins
+    import pymupdf
+    if pymupdf.version[0].startswith("1.25."): sys.exit(1)
+except Exception:
+    pass
+try:
+    import fitz
+    if fitz.version[0].startswith("1.25."): sys.exit(1)
+except Exception:
+    pass
+sys.exit(0)`;
+         require('child_process').execSync(`"${venvPythonCmdLocal}" -c "${pyCheck}"`, { stdio: 'ignore' });
+      } catch (err) {
+         sendLog("info", "Buggy PyMuPDF 1.25.x detected. Auto-downgrading to 1.24.11 which handles subset_fonts correctly... (This may take a minute)");
+         try {
+            require('child_process').execSync(`"${venvPythonCmdLocal}" -m pip install "pymupdf==1.24.11"`, { stdio: 'ignore' });
+         } catch(e) {
+            sendLog("warning", "Auto-downgrade failed, translation might encounter an encoding error.");
+         }
+      }
+  }
+
 
   // Fallback to global pdf2zh if venv doesn't exist just in case they installed it globally
   const commandToRun = fs.existsSync(pdf2zhCmdLocal) ? pdf2zhCmdLocal : "pdf2zh";
