@@ -780,7 +780,7 @@ except Exception as e:
        
        const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
        // Upgrade pip, setuptools, and wheel before installing anything to prevent Wheel build errors during dependencies resolution
-       const pipUpgradeProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]);
+       const pipUpgradeProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--no-cache-dir", "--upgrade", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "pip", "setuptools", "wheel"]);
        let pipUpgradeResolved = false;
        
        pipUpgradeProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
@@ -804,7 +804,7 @@ except Exception as e:
          sendLog("info", `Executing: ${venvPythonCmd} -m pip install pdf2zh (this may take a few minutes)`);
          
          // Use venvPythonCmd -m pip instead of pipCmd to ensure we use the upgraded pip module reliably
-         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "urllib3<2", "certifi", "spacy<3.8.0", "pymupdf==1.24.11", "pdf2zh"]);
+         const pipProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--no-cache-dir", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "urllib3<2", "certifi", "spacy<3.8.0", "pymupdf==1.24.11", "pdf2zh"]);
          let pipResolved = false;
          
          let currentProgress = 30;
@@ -1024,7 +1024,7 @@ sys.exit(0)`;
       } catch (err) {
          sendLog("info", "Buggy PyMuPDF 1.25.x detected. Auto-downgrading to 1.24.11 which handles subset_fonts correctly... (This may take a minute)");
          try {
-            require('child_process').execSync(`"${venvPythonCmdLocal}" -m pip install "pymupdf==1.24.11"`, { stdio: 'ignore' });
+            require('child_process').execSync(`"${venvPythonCmdLocal}" -m pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple "pymupdf==1.24.11"`, { stdio: 'ignore' });
          } catch(e) {
             sendLog("warning", "Auto-downgrade failed, translation might encounter an encoding error.");
          }
