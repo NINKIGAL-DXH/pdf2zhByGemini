@@ -18,7 +18,8 @@ app.use(express.json({ limit: "50mb" }));
 // Using an explicit designated folder in the system so users can cleanly delete it.
 let pdf2zhDataDir = "";
 try {
-  pdf2zhDataDir = path.join(os.homedir(), ".pdf2zh_gui_workspace");
+  // Use system-approved app data directory if provided by Electron, otherwise fallback
+  pdf2zhDataDir = process.env.APP_DATA_DIR || path.join(os.homedir(), ".pdf2zh_gui_workspace");
   if (!fs.existsSync(pdf2zhDataDir)) {
     fs.mkdirSync(pdf2zhDataDir, { recursive: true });
   }
@@ -30,8 +31,9 @@ try {
       fs.mkdirSync(pdf2zhDataDir, { recursive: true });
     }
   } catch (err2) {
-    console.warn("Failed to create workspace in tmpdir, falling back to cwd:", err2);
-    pdf2zhDataDir = path.join(process.cwd(), ".pdf2zh_gui_workspace");
+    console.warn("Failed to create workspace in tmpdir, using a temporary directory path:", err2);
+    // NEVER fall back to process.cwd() in an Electron app as modifying the app bundle breaks the macOS code signature.
+    pdf2zhDataDir = path.join(os.tmpdir(), "pdf2zh_gui_" + Date.now().toString());
     if (!fs.existsSync(pdf2zhDataDir)) {
       fs.mkdirSync(pdf2zhDataDir, { recursive: true });
     }
@@ -62,7 +64,12 @@ const upload = multer({ storage });
 // Resolve and serve the pdfjs-dist web worker locally under same-origin to pass iframe browser sandbox CORS blocks
 app.get("/pdf.worker.min.mjs", (req, res) => {
   try {
-    const workerPath = path.join(process.cwd(), "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    // In production, __dirname is dist/ inside the ASAR. node_modules is at __dirname/../node_modules.
+    // In dev, it might be different, so let's try both paths.
+    let workerPath = path.join(__dirname, "..", "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    if (!fs.existsSync(workerPath)) {
+       workerPath = path.join(process.cwd(), "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    }
     if (fs.existsSync(workerPath)) {
       res.setHeader("Content-Type", "application/javascript");
       return res.sendFile(workerPath);
