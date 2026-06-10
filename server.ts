@@ -40,6 +40,82 @@ try {
   }
 }
 
+// Search paths for portable embedded python runtimes (compatible with pdf2zh-desktop concept)
+function resolvePythonRuntime() {
+  const isWin = process.platform === "win32";
+  const possiblePaths: string[] = [];
+
+  // 1. Electron Packaged extraResources paths
+  // @ts-ignore
+  if (process.resourcesPath) {
+    possiblePaths.push(
+      // @ts-ignore
+      path.join(process.resourcesPath, "python"),
+      // @ts-ignore
+      path.join(process.resourcesPath, "venv"),
+      // @ts-ignore
+      path.join(process.resourcesPath, "app.asar.unpacked", "python"),
+      // @ts-ignore
+      path.join(process.resourcesPath, "app.asar.unpacked", "venv")
+    );
+  }
+
+  // 2. Relative execution runtimes (Portable folder layout)
+  const appRoot = process.cwd();
+  possiblePaths.push(
+    path.join(appRoot, "runtime"),
+    path.join(appRoot, "python"),
+    path.join(appRoot, "venv"),
+    path.join(appRoot, "python-3.12"),
+    path.join(path.dirname(appRoot), "runtime"),
+    path.join(path.dirname(appRoot), "python")
+  );
+
+  for (const baseDir of possiblePaths) {
+    if (fs.existsSync(baseDir)) {
+      const venvPy = isWin ? path.join(baseDir, "Scripts", "python.exe") : path.join(baseDir, "bin", "python3");
+      const venvPyFallback = isWin ? path.join(baseDir, "python.exe") : path.join(baseDir, "bin", "python");
+      
+      const venvPdf2zh = isWin ? path.join(baseDir, "Scripts", "pdf2zh.exe") : path.join(baseDir, "bin", "pdf2zh");
+      const venvPdf2zhFallback = isWin ? path.join(baseDir, "pdf2zh.exe") : path.join(baseDir, "pdf2zh");
+
+      // Verify that python execution entrypoint and libraries are genuinely resident
+      if (fs.existsSync(venvPy)) {
+        const hasLocalPdf2z = fs.existsSync(venvPdf2zh) || fs.existsSync(path.join(baseDir, "lib", "site-packages", "pdf2zh")) || fs.existsSync(path.join(baseDir, "Lib", "site-packages", "pdf2zh"));
+        return {
+          venvDir: baseDir,
+          pythonCmd: venvPy,
+          pdf2zhCmd: fs.existsSync(venvPdf2zh) ? venvPdf2zh : venvPy,
+          useModuleMode: !fs.existsSync(venvPdf2zh),
+          isEmbedded: true,
+          hasPdf2zhInstalled: hasLocalPdf2z
+        };
+      } else if (fs.existsSync(venvPyFallback)) {
+        const hasLocalPdf2z = fs.existsSync(venvPdf2zhFallback) || fs.existsSync(path.join(baseDir, "Lib", "site-packages", "pdf2zh")) || fs.existsSync(path.join(baseDir, "lib", "site-packages", "pdf2zh"));
+        return {
+          venvDir: baseDir,
+          pythonCmd: venvPyFallback,
+          pdf2zhCmd: fs.existsSync(venvPdf2zhFallback) ? venvPdf2zhFallback : venvPyFallback,
+          useModuleMode: !fs.existsSync(venvPdf2zhFallback),
+          isEmbedded: true,
+          hasPdf2zhInstalled: hasLocalPdf2z
+        };
+      }
+    }
+  }
+
+  // Fallback to systemic/AppData-isolated venv fallback
+  const defaultVenv = path.join(pdf2zhDataDir, "venv");
+  return {
+    venvDir: defaultVenv,
+    pythonCmd: isWin ? "python" : "python3",
+    pdf2zhCmd: isWin ? path.join(defaultVenv, "Scripts", "pdf2zh.exe") : path.join(defaultVenv, "bin", "pdf2zh"),
+    useModuleMode: false,
+    isEmbedded: false,
+    hasPdf2zhInstalled: fs.existsSync(isWin ? path.join(defaultVenv, "Scripts", "pdf2zh.exe") : path.join(defaultVenv, "bin", "pdf2zh"))
+  };
+}
+
 // Multer storage for uploaded PDFs waiting for native python translation
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -631,11 +707,24 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
 
   sendLog("info", `Workspace configuration directory created safely at: ${pdf2zhDataDir}`);
 
-  const venvDir = path.join(pdf2zhDataDir, "venv");
+  const runtime = resolvePythonRuntime();
+  const venvDir = runtime.venvDir;
   const isWin = process.platform === "win32";
-  const pythonCmd = isWin ? "python" : "python3";
-  const pipCmd = isWin ? path.join(venvDir, "Scripts", "pip.exe") : path.join(venvDir, "bin", "pip");
-  const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
+  const pythonCmd = runtime.pythonCmd;
+  const pdf2zhCmdLocal = runtime.pdf2zhCmd;
+
+  if (runtime.isEmbedded) {
+    sendLog("success", `[独立运行时激活] 电脑端完全独立打包运行时就绪: ${runtime.venvDir}`);
+    if (runtime.hasPdf2zhInstalled) {
+      sendLog("success", "👉 检测到绿色微型 Python 3.12 核心与核心依赖 (pdf2zh, PyMuPDF, RapidOCR) 已完全内置打包。");
+      sendLog("success", "系统零污染，电脑无需预装 Python，不需消耗网络下载，双击即享工业级保密翻译。");
+      res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully via embedded package." })}\n\n`);
+      return res.end();
+    } else {
+      sendLog("info", "👉 已匹配内置独立 Python 运行时。正在调用打包区便携 Python 引擎离线微调依赖包...");
+    }
+  }
 
   const forceReinstall = req.query.forceReinstall === 'true';
 
@@ -897,7 +986,7 @@ app.post("/api/pdf2zh-uninstall", async (req, res) => {
 // API to proxy huggingface downloads (bypasses python SSL/TLS limitations on older macs)
 app.use("/hf-proxy", (req, res) => {
   // Extract target URL from query parameter if provided (for redirects), else build from req.url
-  let targetUrlStr = req.query.url;
+  let targetUrlStr = typeof req.query.url === "string" ? req.query.url : "";
   if (!targetUrlStr) {
      // Remove query params related to hfproxy if any, usually it's just the path
      targetUrlStr = "https://hf-mirror.com" + req.url;
@@ -1008,10 +1097,11 @@ app.post("/api/pdf2zh-translate", upload.single("file"), async (req, res) => {
   }
 
   
-  const venvDir = path.join(pdf2zhDataDir, "venv");
+  const runtime = resolvePythonRuntime();
+  const venvDir = runtime.venvDir;
   const isWin = process.platform === "win32";
-  const pdf2zhCmdLocal = isWin ? path.join(venvDir, "Scripts", "pdf2zh.exe") : path.join(venvDir, "bin", "pdf2zh");
-  const venvPythonCmdLocal = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+  const pdf2zhCmdLocal = runtime.pdf2zhCmd;
+  const venvPythonCmdLocal = runtime.pythonCmd;
 
   // Auto-downgrade for PyMuPDF 1.25.x bug
   if (fs.existsSync(venvPythonCmdLocal)) {
@@ -1042,12 +1132,18 @@ sys.exit(0)`;
 
 
   // Fallback to global pdf2zh if venv doesn't exist just in case they installed it globally
-  const commandToRun = fs.existsSync(pdf2zhCmdLocal) ? pdf2zhCmdLocal : "pdf2zh";
+  let commandToRun = fs.existsSync(pdf2zhCmdLocal) ? pdf2zhCmdLocal : "pdf2zh";
+  let executionArgs = [...args];
 
-  sendLog("info", `Executing command: ${commandToRun} ${args.join(" ")}`);
+  if (runtime.useModuleMode && runtime.isEmbedded) {
+     commandToRun = runtime.pythonCmd;
+     executionArgs.unshift("-m", "pdf2zh");
+  }
+
+  sendLog("info", `Executing command: ${commandToRun} ${executionArgs.join(" ")}`);
   sendLog("info", "Working directory: " + pdf2zhDataDir);
 
-  const proc = spawn(commandToRun, args, { cwd: pdf2zhDataDir, env: envVars });
+  const proc = spawn(commandToRun, executionArgs, { cwd: pdf2zhDataDir, env: envVars });
   let transResolved = false;
 
   proc.stdout.on("data", (data) => {

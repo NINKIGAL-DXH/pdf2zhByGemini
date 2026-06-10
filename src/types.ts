@@ -18,6 +18,12 @@ export interface TranslationParams {
   translateFigures: boolean;
   fontSizeRatio: number;
   layoutEngine: "fitz" | "pdfplumber";
+  enableChunking?: boolean;
+  enableBreakpointResume?: boolean;
+  enableMemoryOptimization?: boolean;
+  enableBottomCover?: boolean;
+  enableTablePipeline?: boolean;
+  ocrEngine?: "none" | "rapidocr";
 }
 
 export interface PDFLayoutBlock {
@@ -38,6 +44,7 @@ export interface PDFPage {
   width: number;
   height: number;
   backgroundUrl?: string;
+  originalBackgroundUrl?: string;
 }
 
 export interface TranslatedDoc {

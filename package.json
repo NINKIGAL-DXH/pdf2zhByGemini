@@ -15,8 +15,19 @@
       "electron-main.cjs",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "runtime",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "mac": {
       "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         {
           "target": "dmg",

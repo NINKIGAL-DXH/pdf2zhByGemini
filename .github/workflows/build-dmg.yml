@@ -30,6 +30,21 @@ jobs:
         run: |
           npm run build
 
+      - name: Pre-Fetch & Integrate Standalone Portable Python 3.12 Runtime
+        run: |
+          mkdir -p runtime
+          echo "Fetching secure portable built stand-alone python..."
+          curl -L -o python.tar.gz "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.12.3%2B20240415-x86_64-apple-darwin-install_only.tar.gz"
+          tar -xzf python.tar.gz -C runtime --strip-components=1
+          
+          echo "Pre-installing pdf2zh and scientific wheels offline into built-in package to guarantee zero network dependency..."
+          ./runtime/bin/python3 -m pip install --upgrade pip
+          ./runtime/bin/python3 -m pip install urllib3<2 certifi "pymupdf==1.24.11" "spacy<3.8.0" "rapidocr-onnxruntime" pdf2zh
+          
+          echo "Cleaning bytecode caches to minimize delivery payload..."
+          find runtime -type d -name "__pycache__" -exec rm -rf {} +
+          rm python.tar.gz
+
       - name: Install macOS Desktop Packager
         run: |
           npm install --save-dev electron electron-builder

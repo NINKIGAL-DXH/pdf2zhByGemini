@@ -331,3 +331,224 @@ export const MOCK_TERMINAL_LOGS = [
   { time: 4200, text: "[pdf2zh] SUCCESS: Translations completed in 4.2 seconds." },
   { time: 4400, text: "[pdf2zh] Outputs saved: [document.mono.pdf] & [document.dual.pdf]" },
 ];
+
+export interface AIPreset {
+  id: string;
+  name: string;
+  provider: "openai" | "lmstudio" | "omlx" | "gemini";
+  model: string;
+  endpoint: string;
+  apiKeyPlaceholder: string;
+  desc: string;
+}
+
+export const AI_MODEL_PRESETS: AIPreset[] = [
+  {
+    id: "ds-v3",
+    name: "DeepSeek V3 (官方 API)",
+    provider: "openai",
+    model: "deepseek-chat",
+    endpoint: "https://api.deepseek.com/v1",
+    apiKeyPlaceholder: "输入您的 DeepSeek API Key (sk-...)",
+    desc: "极致性价比！超高通用智能，中英互译自然、符合学术语汇。"
+  },
+  {
+    id: "ds-r1",
+    name: "DeepSeek R1 (满血版推理)",
+    provider: "openai",
+    model: "deepseek-reasoner",
+    endpoint: "https://api.deepseek.com/v1",
+    apiKeyPlaceholder: "输入您的 DeepSeek API Key (sk-...)",
+    desc: "最强推理模型！融合深度思维链，翻译严谨定理、公式、长难句版式表现极佳。"
+  },
+  {
+    id: "sf-dsv3",
+    name: "SiliconFlow 硅基流动 (DeepSeek-V3)",
+    provider: "openai",
+    model: "deepseek-ai/DeepSeek-V3",
+    endpoint: "https://api.siliconflow.cn/v1",
+    apiKeyPlaceholder: "输入 SiliconFlow API Key (sk-...)",
+    desc: "高并发，低延迟，推荐用于大批量学术论文翻译。"
+  },
+  {
+    id: "sf-dsr1",
+    name: "SiliconFlow 硅基流动 (DeepSeek-R1)",
+    provider: "openai",
+    model: "deepseek-ai/DeepSeek-R1",
+    endpoint: "https://api.siliconflow.cn/v1",
+    apiKeyPlaceholder: "输入 SiliconFlow API Key (sk-...)",
+    desc: "满血版 DeepSeek R1 托管加速端，推理速度显著优于官方。"
+  },
+  {
+    id: "gpt-4o-mini",
+    name: "GPT-4o Mini (官方 OpenAI)",
+    provider: "openai",
+    model: "gpt-4o-mini",
+    endpoint: "https://api.openai.com/v1",
+    apiKeyPlaceholder: "输入 OpenAI API Key (sk-...)",
+    desc: "速度飞快！高稳定性，最经典的全场景轻量翻译首选。"
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o (官方经典高精)",
+    provider: "openai",
+    model: "gpt-4o",
+    endpoint: "https://api.openai.com/v1",
+    apiKeyPlaceholder: "输入 OpenAI API Key (sk-...)",
+    desc: "行业黄金标杆！极高的多语种学术对齐能力，对复杂版面重构理解极深。"
+  },
+  {
+    id: "glm-4-flash",
+    name: "Zhipu 智谱 AI (GLM-4-Flash)",
+    provider: "openai",
+    model: "glm-4-flash",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyPlaceholder: "输入智谱开放平台 API Key",
+    desc: "全免费/极低价推荐！对中文专业术语解析有天然本土优势。"
+  },
+  {
+    id: "glm-4-plus",
+    name: "Zhipu 智谱 AI (GLM-4-Plus)",
+    provider: "openai",
+    model: "glm-4-plus",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4",
+    apiKeyPlaceholder: "输入智谱开放平台 API Key",
+    desc: "智谱旗舰大模型，严谨的行业报告、专利文本翻译专家。"
+  },
+  {
+    id: "gemini-flash",
+    name: "Google Gemini 1.5 Flash",
+    provider: "gemini",
+    model: "gemini-1.5-flash",
+    endpoint: "Cloud run",
+    apiKeyPlaceholder: "内置免费 Cloud API Key (免配置)",
+    desc: "百万超长上下文！中英直译无损，免费通道直连。"
+  },
+  {
+    id: "gemini-pro",
+    name: "Google Gemini 1.5 Pro",
+    provider: "gemini",
+    model: "gemini-1.5-pro",
+    endpoint: "Cloud run",
+    apiKeyPlaceholder: "内置免费 Cloud API Key",
+    desc: "高智商旗舰，拥有强大的跨学科推理与语言精炼风格。"
+  },
+  {
+    id: "moonshot-kimi",
+    name: "Moonshot Kimi (月之暗面)",
+    provider: "openai",
+    model: "moonshot-v1-8k",
+    endpoint: "https://api.moonshot.cn/v1",
+    apiKeyPlaceholder: "输入 Kimi API Key",
+    desc: "长文本处理专家，中文文学润色以及翻译润色表现上乘。"
+  },
+  {
+    id: "yi-lightning",
+    name: "01.AI 零一万物 (Yi-Lightning)",
+    provider: "openai",
+    model: "yi-lightning",
+    endpoint: "https://api.lingyiwanwu.com/v1",
+    apiKeyPlaceholder: "输入零一万物 API Key",
+    desc: "开箱即用，中文表达流畅，适合偏社科和金融类的报告文件。"
+  },
+  {
+    id: "doubao-pro",
+    name: "火山引擎 字节跳动 (Doubao-Pro)",
+    provider: "openai",
+    model: "doubao-pro-32k",
+    endpoint: "https://ark.cn-beijing.volces.com/api/v3",
+    apiKeyPlaceholder: "输入火山引擎 Endpoint ID 及 Key",
+    desc: "超大规模本土算力调度，翻译生动地道，性价比卓越。"
+  },
+  {
+    id: "ollama-llama33",
+    name: "Ollama Llama 3.3 (本地离线机)",
+    provider: "omlx",
+    model: "llama3.3",
+    endpoint: "http://localhost:11434",
+    apiKeyPlaceholder: "无需 API Key",
+    desc: "本地独立显卡离线运行，100% 数据私密性，无网络开销。"
+  },
+  {
+    id: "ollama-qwen25",
+    name: "Ollama Qwen 2.5 (千问本地版)",
+    provider: "omlx",
+    model: "qwen2.5:7b",
+    endpoint: "http://localhost:11434",
+    apiKeyPlaceholder: "无需 API Key",
+    desc: "国内最强开源，小尺寸模型对电脑配置友好，离线断网最强推荐。"
+  },
+  {
+    id: "lmstudio-qwen",
+    name: "LM Studio Qwen 2.5 (本地兼容栈)",
+    provider: "lmstudio",
+    model: "qwen2.5",
+    endpoint: "http://localhost:1234/v1",
+    apiKeyPlaceholder: "无需 API Key",
+    desc: "配合 LM Studio GUI 运行本地 GGUF 量化模型。"
+  },
+  {
+    id: "openrouter-ds",
+    name: "OpenRouter (DeepSeek R1/V3 通道)",
+    provider: "openai",
+    model: "deepseek/deepseek-r1",
+    endpoint: "https://openrouter.ai/api/v1",
+    apiKeyPlaceholder: "输入 OpenRouter Key",
+    desc: "免除国内信用卡绑定限制，一键中转全球各顶级开源与闭源翻译引擎。"
+  },
+  {
+    id: "groq-llama3",
+    name: "Groq Llama-3-70B (极速推理通道)",
+    provider: "openai",
+    model: "llama3-70b-8192",
+    endpoint: "https://api.groq.com/openai/v1",
+    apiKeyPlaceholder: "输入 Groq API Key",
+    desc: "推理速度惊人！几秒钟闪电生成，极佳的轻量翻译响应。"
+  },
+  {
+    id: "mistral-large",
+    name: "Mistral Large (法国顶奢开源)",
+    provider: "openai",
+    model: "mistral-large-latest",
+    endpoint: "https://api.mistral.ai/v1",
+    apiKeyPlaceholder: "输入 Mistral Key",
+    desc: "极强的小语种（法语/德语/西班牙语等）支持，欧洲学术规范必选。"
+  },
+  {
+    id: "deepseek-r1-distill",
+    name: "Ollama DeepSeek-R1-Distill-Qwen (8B)",
+    provider: "omlx",
+    model: "deepseek-r1:8b",
+    endpoint: "http://localhost:11434",
+    apiKeyPlaceholder: "无需 API Key",
+    desc: "本地运行蒸馏版 DeepSeek R1 推理模型，速度与逻辑兼备。"
+  }
+];
+
+export interface OpenAITemplate {
+  name: string;
+  endpoint: string;
+  defaultModel: string;
+  helpUrl: string;
+}
+
+export const FAST_OPENAI_TEMPLATES: OpenAITemplate[] = [
+  { name: "DeepSeek 官方", endpoint: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat", helpUrl: "https://platform.deepseek.com" },
+  { name: "SiliconFlow 硅基流动", endpoint: "https://api.siliconflow.cn/v1", defaultModel: "deepseek-ai/DeepSeek-V3", helpUrl: "https://siliconflow.cn" },
+  { name: "OpenAI 官方", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", helpUrl: "https://platform.openai.com" },
+  { name: "智谱 AI (GLM)", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4-flash", helpUrl: "https://open.bigmodel.cn" },
+  { name: "月之暗面 (Kimi)", endpoint: "https://api.moonshot.cn/v1", defaultModel: "moonshot-v1-8k", helpUrl: "https://platform.moonshot.cn" },
+  { name: "零一万物 (Yi)", endpoint: "https://api.lingyiwanwu.com/v1", defaultModel: "yi-lightning", helpUrl: "https://platform.lingyiwanwu.com" },
+  { name: "火山引擎 (Ark)", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-pro-32k", helpUrl: "https://volcengine.com" },
+  { name: "百度千帆 (Wesley)", endpoint: "https://qianfan.baidubce.com/v2", defaultModel: "ernie-speed-128k", helpUrl: "https://cloud.baidu.com/qianfan" },
+  { name: "阿里百炼 (DashScope)", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", helpUrl: "https://bailian.aliyun.com" },
+  { name: "腾讯混元", endpoint: "https://api.hunyuan.tencent.com/v1", defaultModel: "hunyuan-standard", helpUrl: "https://cloud.tencent.com/product/hunyuan" },
+  { name: "OpenRouter 中转", endpoint: "https://openrouter.ai/api/v1", defaultModel: "deepseek/deepseek-r1", helpUrl: "https://openrouter.ai" },
+  { name: "Groq 极速端", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-specdec", helpUrl: "https://groq.com" },
+  { name: "Mistral AI", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", helpUrl: "https://console.mistral.ai" },
+  { name: "Together AI", endpoint: "https://api.together.xyz/v1", defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo", helpUrl: "https://together.xyz" },
+  { name: "Anyscale", endpoint: "https://api.endpoints.anyscale.com/v1", defaultModel: "meta-llama/Meta-Llama-3-70B-Instruct", helpUrl: "https://anyscale.com" },
+  { name: "Novita AI", endpoint: "https://api.novita.ai/v3/openai", defaultModel: "deepseek/deepseek-r1", helpUrl: "https://novita.ai" },
+  { name: "DeepL Translate (兼容中转)", endpoint: "https://api-free.deepl.com/v2", defaultModel: "deepl-v2", helpUrl: "https://deepl.com" }
+];
+
