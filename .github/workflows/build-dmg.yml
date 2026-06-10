@@ -47,8 +47,12 @@ jobs:
           ./runtime/bin/python3 -m pip install --upgrade pip
           ./runtime/bin/python3 -m pip install "urllib3<2" certifi "pymupdf==1.24.11" "spacy<3.8.0" "rapidocr-onnxruntime" pdf2zh
           
-          echo "Cleaning bytecode caches to minimize delivery payload..."
+          echo "Cleaning bytecode caches & broken symlinks to minimize delivery payload and fix Gatekeeper codesign issues..."
           find runtime -type d -name "__pycache__" -exec rm -rf {} +
+          find runtime -type l ! -exec test -e {} \; -delete
+          echo "Removing quarantine attributes and existing signatures from embedded python binaries to prevent Gatekeeper corruption..."
+          find runtime -type f -exec xattr -c {} \; || true
+          find runtime -type f \( -name "*.dylib" -o -name "*.so" -o -name "python3*" -o -executable \) -exec codesign --remove-signature {} \; 2>/dev/null || true
           rm python.tar.gz
 
       - name: Install macOS Desktop Packager

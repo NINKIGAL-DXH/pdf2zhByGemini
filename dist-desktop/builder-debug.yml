@@ -1,12 +1,11 @@
 x64:
   firstOrDefaultFilePatterns:
+    - '!**/node_modules/**'
     - '!build{,/**/*}'
     - '!dist-desktop{,/**/*}'
     - dist/**/*
     - electron-main.cjs
     - package.json
-    - '!**/node_modules/**'
-    - node_modules/**/*
     - '!**/*.{iml,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,suo,xproj,cc,d.ts,mk,a,o,obj,forge-meta,pdb}'
     - '!**/._*'
     - '!**/electron-builder.{yaml,yml,json,json5,toml,ts}'
@@ -19,4 +18,3 @@ x64:
     - dist/**/*
     - electron-main.cjs
     - package.json
-    - node_modules/**/*
