@@ -7,7 +7,6 @@ process.env.PORT = '0'; // Use 0 to let OS assign a random free port
 process.env.HOST = '127.0.0.1'; // Bind strictly to localhost // Use a distinct port for desktop client to avoid conflicts with 3000
 
 // Provide the system-approved user data directory for the server to avoid writing to $HOME directly
-process.env.APP_DATA_DIR = app.getPath('userData');
 
 let mainWindow;
 
@@ -90,7 +89,10 @@ if (!gotTheLock) {
     }
   });
 
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => {
+    process.env.APP_DATA_DIR = app.getPath('userData');
+    createWindow();
+  });
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
