@@ -64,9 +64,11 @@ const upload = multer({ storage });
 // Resolve and serve the pdfjs-dist web worker locally under same-origin to pass iframe browser sandbox CORS blocks
 app.get("/pdf.worker.min.mjs", (req, res) => {
   try {
-    // In production, __dirname is dist/ inside the ASAR. node_modules is at __dirname/../node_modules.
-    // In dev, it might be different, so let's try both paths.
-    let workerPath = path.join(__dirname, "..", "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    // In production, __dirname is dist/ inside the ASAR. We copy the worker there during build, so check __dirname first.
+    let workerPath = path.join(__dirname, "pdf.worker.min.mjs");
+    if (!fs.existsSync(workerPath)) {
+       workerPath = path.join(__dirname, "..", "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
+    }
     if (!fs.existsSync(workerPath)) {
        workerPath = path.join(process.cwd(), "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs");
     }
