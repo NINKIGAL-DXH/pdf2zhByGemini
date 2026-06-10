@@ -34,7 +34,13 @@ jobs:
         run: |
           mkdir -p runtime
           echo "Fetching secure portable built stand-alone python..."
-          curl -L -o python.tar.gz "https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.12.3%2B20240415-x86_64-apple-darwin-install_only.tar.gz"
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.12.3%2B20240415-x86_64-apple-darwin-install_only.tar.gz"
+          else
+            PY_URL="https://github.com/indygreg/python-build-standalone/releases/download/20240415/cpython-3.12.3%2B20240415-aarch64-apple-darwin-install_only.tar.gz"
+          fi
+          curl -L -o python.tar.gz "$PY_URL"
           tar -xzf python.tar.gz -C runtime --strip-components=1
           
           echo "Pre-installing pdf2zh and scientific wheels offline into built-in package to guarantee zero network dependency..."
@@ -51,7 +57,12 @@ jobs:
 
       - name: Compile and Package macOS DMG
         run: |
-          npx electron-builder build --mac dmg --publish never
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+             npx electron-builder build --mac dmg --x64 --publish never
+          else
+             npx electron-builder build --mac dmg --arm64 --publish never
+          fi
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
