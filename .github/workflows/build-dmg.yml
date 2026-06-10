@@ -39,7 +39,7 @@ jobs:
           
           echo "Pre-installing pdf2zh and scientific wheels offline into built-in package to guarantee zero network dependency..."
           ./runtime/bin/python3 -m pip install --upgrade pip
-          ./runtime/bin/python3 -m pip install urllib3<2 certifi "pymupdf==1.24.11" "spacy<3.8.0" "rapidocr-onnxruntime" pdf2zh
+          ./runtime/bin/python3 -m pip install "urllib3<2" certifi "pymupdf==1.24.11" "spacy<3.8.0" "rapidocr-onnxruntime" pdf2zh
           
           echo "Cleaning bytecode caches to minimize delivery payload..."
           find runtime -type d -name "__pycache__" -exec rm -rf {} +
