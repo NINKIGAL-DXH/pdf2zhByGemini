@@ -718,12 +718,11 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
     if (runtime.hasPdf2zhInstalled) {
       sendLog("success", "👉 检测到绿色微型 Python 3.12 核心与核心依赖 (pdf2zh, PyMuPDF, RapidOCR) 已完全内置打包。");
       sendLog("success", "系统零污染，电脑无需预装 Python，不需消耗网络下载，双击即享工业级保密翻译。");
-      res.write(`data: ${JSON.stringify({ type: "progress", value: 100 })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed successfully via embedded package." })}\n\n`);
-      return res.end();
     } else {
       sendLog("info", "👉 已匹配内置独立 Python 运行时。正在调用打包区便携 Python 引擎离线微调依赖包...");
     }
+    // We proceed to downloadModel() so it can fetch the required ONNX weights if not present.
+    // If hasPdf2zhInstalled is false, createVenvAndInstall will ONLY pip install, not recreate venv.
   }
 
   const forceReinstall = req.query.forceReinstall === 'true';
@@ -732,7 +731,7 @@ app.post("/api/pdf2zh-setup", async (req, res) => {
      sendLog("info", "Pre-downloading required ONNX layout models from HF Hub...");
      res.write(`data: ${JSON.stringify({ type: "progress", value: 90 })}\n\n`);
      
-     const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+     const venvPythonCmd = runtime.pythonCmd;
      
      // Instead of just calling huggingface_hub.cli directly which might be problematic, 
      // we run pdf2zh with a dummy command or trigger its model download, 
@@ -812,13 +811,15 @@ except Exception as e:
   }
 
   if (forceReinstall) {
-    sendLog("info", "Force reinstall requested. Cleaning up existing virtual environment...");
-    if (fs.existsSync(venvDir)) {
+    sendLog("info", "Force reinstall requested. Cleaning up existing environment...");
+    if (!runtime.isEmbedded && fs.existsSync(venvDir)) {
        try {
           fs.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
        } catch (err) {
           sendLog("warning", `Could not completely remove existing venvDir (${err.message}). Proceeding anyway.`);
        }
+    } else if (runtime.isEmbedded) {
+       sendLog("info", "Skipping directory removal because this is an embedded portable Python runtime. Forcing pip install.");
     }
     createVenvAndInstall();
   } else {
@@ -837,46 +838,28 @@ except Exception as e:
       if (testResolved) return;
       testResolved = true;
       if (code === 0) {
-        sendLog("success", "pdf2zh is already installed in the isolated virtual environment and is working correctly!");
+        sendLog("success", "pdf2zh is already installed and is working correctly!");
         res.write(`data: ${JSON.stringify({ type: "progress", value: 80 })}\n\n`);
         downloadModel();
       } else {
         sendLog("warning", "Existing pdf2zh installation appears broken. Re-installing...");
-        if (fs.existsSync(venvDir)) {
-       try {
-          fs.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-       } catch (err) {
-          sendLog("warning", `Could not completely remove existing venvDir (${err.message}). Proceeding anyway.`);
-       }
-    }
+        if (!runtime.isEmbedded && fs.existsSync(venvDir)) {
+           try {
+              fs.rmSync(venvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+           } catch (err) {
+              sendLog("warning", `Could not completely remove existing venvDir (${err.message}). Proceeding anyway.`);
+           }
+        }
         createVenvAndInstall();
       }
     });
   }
 
-  function createVenvAndInstall() {
-    sendLog("info", `Creating self-contained python virtual environment at: ${venvDir}`);
-    res.write(`data: ${JSON.stringify({ type: "progress", value: 10 })}\n\n`);
-    const venvProc = spawn(pythonCmd, ["-m", "venv", venvDir]);
-    let venvResolved = false;
-    
-    venvProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
-    venvProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
-    
-    venvProc.on("close", (code) => {
-       if (venvResolved) return;
-       venvResolved = true;
-       if (code !== 0) {
-          sendLog("error", `Failed to create virtual environment (code ${code}). Please ensure python3-venv is installed.`);
-          res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: "done", message: "Setup failed during venv creation." })}\n\n`);
-          return res.end();
-       }
-       
-       sendLog("success", "Virtual environment created successfully. Upgrading pip and essential build tools...");
+  function installDependencies() {
+       sendLog("success", "Environment ready. Upgrading pip and essential build tools...");
        res.write(`data: ${JSON.stringify({ type: "progress", value: 20 })}\n\n`);
        
-       const venvPythonCmd = isWin ? path.join(venvDir, "Scripts", "python.exe") : path.join(venvDir, "bin", "python3");
+       const venvPythonCmd = runtime.pythonCmd;
        // Upgrade pip, setuptools, and wheel before installing anything to prevent Wheel build errors during dependencies resolution
        const pipUpgradeProc = spawn(venvPythonCmd, ["-m", "pip", "install", "--no-cache-dir", "--upgrade", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "pip", "setuptools", "wheel"]);
        let pipUpgradeResolved = false;
@@ -886,7 +869,7 @@ except Exception as e:
        pipUpgradeProc.on("error", (err) => {
            if (pipUpgradeResolved) return;
            pipUpgradeResolved = true;
-           sendLog("warning", `Failed to span pip upgrade command: ${err.message}. It will try proceeding with default pip version.`);
+           sendLog("warning", `Failed to spawn pip upgrade command: ${err.message}. It will try proceeding with default pip version.`);
        });
 
        pipUpgradeProc.on("close", (upgradeCode) => {
@@ -937,12 +920,40 @@ except Exception as e:
          pipProc.on("error", (err) => {
              if (pipResolved) return;
              pipResolved = true;
-             sendLog("error", `Failed to span pip command: ${err.message}.`);
+             sendLog("error", `Failed to spawn pip command: ${err.message}.`);
              res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
              res.write(`data: ${JSON.stringify({ type: "done", message: "Setup completed with errors." })}\n\n`);
              res.end();
          });
        });
+  }
+
+  function createVenvAndInstall() {
+    if (runtime.isEmbedded) {
+       sendLog("info", `Skipping venv creation as we are using self-contained embedded Python runtime.`);
+       installDependencies();
+       return;
+    }
+
+    sendLog("info", `Creating self-contained python virtual environment at: ${venvDir}`);
+    res.write(`data: ${JSON.stringify({ type: "progress", value: 10 })}\n\n`);
+    const venvProc = spawn(pythonCmd, ["-m", "venv", venvDir]);
+    let venvResolved = false;
+    
+    venvProc.stdout.on("data", (data) => sendLog("stdout", data.toString()));
+    venvProc.stderr.on("data", (data) => sendLog("stderr", data.toString()));
+    
+    venvProc.on("close", (code) => {
+       if (venvResolved) return;
+       venvResolved = true;
+       if (code !== 0) {
+          sendLog("error", `Failed to create virtual environment (code ${code}). Please ensure python3-venv is installed.`);
+          res.write(`data: ${JSON.stringify({ type: "progress", value: 0 })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done", message: "Setup failed during venv creation." })}\n\n`);
+          return res.end();
+       }
+       
+       installDependencies();
     });
     
     venvProc.on("error", (err) => {
